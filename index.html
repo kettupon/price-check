@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#16a34a">
+    <title>Check Price Tracker</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Noto+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        /* Base Settings */
+        html, body { 
+            font-family: 'Inter', 'Noto Sans Thai', sans-serif; 
+            background-color: #f5f5f4; 
+            overscroll-behavior: none; 
+            touch-action: manipulation; 
+            height: 100%;
+            overflow: hidden;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        /* Custom Scrollbar */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* Interactive Effects */
+        .btn-press { transition: transform 0.05s ease, background-color 0.1s; cursor: pointer; }
+        .btn-press:active { transform: scale(0.96); filter: brightness(0.95); }
+        
+        .tab-active {
+            border-bottom: 2px solid #16a34a; /* Green-600 */
+            color: #15803d !important; /* Green-700 */
+            font-weight: 700;
+        }
+
+        /* Animations */
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+
+        /* Input Styles */
+        input, select, textarea {
+            font-family: 'Noto Sans Thai', sans-serif;
+            -webkit-appearance: none;
+        }
+        
+        /* Mobile Layout Adjustments */
+        @media (max-width: 768px) {
+            .mobile-hidden { display: none !important; }
+            .mobile-view { display: flex !important; }
+            
+            .input-zone { 
+                flex: 1; 
+                padding-bottom: env(safe-area-inset-bottom); 
+                border-radius: 2rem 2rem 0 0; 
+                box-shadow: 0 -4px 20px rgba(0,0,0,0.05); 
+                z-index: 20; 
+                overflow-y: auto;
+            }
+        }
+
+        @media (min-width: 769px) {
+            body { overflow: auto; padding: 20px; }
+            .desktop-card { height: 90vh; max-height: 900px; border-radius: 1.5rem; }
+            .input-zone { flex: 1; overflow-y: auto; }
+            .side-zone { flex: 0 0 40%; max-width: 450px; }
+        }
+    </style>
+</head>
+<body class="bg-stone-100 w-full flex items-center justify-center text-gray-800">
+
+    <div class="bg-white w-full max-w-7xl h-full md:h-[90vh] desktop-card shadow-2xl overflow-hidden flex flex-col md:flex-row border border-gray-200 relative">
+        
+        <!-- Mobile Tabs (Top Fixed) -->
+        <div class="md:hidden flex bg-white border-b border-gray-100 flex-none z-50 pt-[env(safe-area-inset-top)]">
+            <button onclick="switchView('input')" id="tab-m-input" class="flex-1 py-4 text-[11px] font-bold text-gray-400 tab-active uppercase tracking-wider touch-manipulation">Add Price</button>
+            <button onclick="switchView('history')" id="tab-m-history" class="flex-1 py-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider touch-manipulation">List</button>
+            <button onclick="switchView('dashboard')" id="tab-m-dashboard" class="flex-1 py-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider touch-manipulation">Dashboard</button>
+        </div>
+
+        <!-- LEFT SECTION: List & Dashboard (Sidebar on Desktop) -->
+        <div id="side-section" class="w-full md:w-2/5 bg-gray-50 border-r border-gray-200 flex-col mobile-hidden md:flex min-h-0 overflow-hidden relative z-0 side-zone">
+            
+            <!-- Desktop Tabs -->
+            <div class="bg-white border-b border-gray-200 hidden md:block flex-none">
+                <div class="flex">
+                    <button id="tab-history" onclick="switchView('history')" class="flex-1 py-4 text-sm font-bold text-gray-400 hover:bg-gray-50 transition-colors tab-active">Item List</button>
+                    <button id="tab-dashboard" onclick="switchView('dashboard')" class="flex-1 py-4 text-sm font-bold text-gray-400 hover:bg-gray-50 transition-colors">Dashboard</button>
+                </div>
+            </div>
+            
+            <!-- LIST VIEW -->
+            <div id="history-container" class="flex-1 flex flex-col min-h-0 overflow-hidden">
+                <!-- Search Header -->
+                <div class="p-4 bg-white border-b border-gray-100 space-y-3">
+                    <div class="relative">
+                        <input type="text" id="searchInput" placeholder="Search items or stores..." class="w-full pl-10 pr-4 py-3 bg-gray-100 border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-green-500 outline-none transition-shadow">
+                        <svg class="w-5 h-5 text-gray-400 absolute left-3 top-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                        <button id="clearSearchBtn" class="absolute right-3 top-3 text-gray-400 hidden hover:text-gray-600">✕</button>
+                    </div>
+                    <div class="flex items-center gap-4 px-1">
+                        <label class="flex items-center text-xs font-bold text-gray-500 cursor-pointer">
+                            <input type="checkbox" id="sortLatestOnTop" class="mr-2 rounded text-green-600 focus:ring-green-500"> Latest First
+                        </label>
+                        <div class="flex items-center gap-2 ml-auto">
+                            <span class="text-[10px] font-bold text-gray-400 uppercase">Search By:</span>
+                            <label class="text-[10px] font-bold text-green-600 cursor-pointer"><input type="radio" name="searchType" id="searchContains" class="hidden" checked> <span>Contains</span></label>
+                            <label class="text-[10px] font-bold text-gray-400 cursor-pointer"><input type="radio" name="searchType" id="searchPrefix" class="hidden"> <span>Prefix</span></label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- List Content -->
+                <div id="inventoryList" class="flex-1 overflow-y-auto p-4 space-y-3 no-scrollbar pb-24 md:pb-4">
+                    <!-- Items injected here -->
+                </div>
+            </div>
+
+            <!-- DASHBOARD VIEW -->
+            <div id="dashboard-container" class="flex-1 flex flex-col overflow-y-auto p-4 space-y-6 hidden pb-24 md:pb-4 no-scrollbar bg-gray-50">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-xl font-bold text-gray-800 tracking-tight">Overview</h3>
+                    <div class="text-xs font-bold bg-green-100 text-green-700 px-3 py-1 rounded-lg">All Time</div>
+                </div>
+
+                <!-- Stats Card -->
+                <div class="p-5 bg-white rounded-3xl shadow-sm border border-gray-100">
+                    <div class="grid grid-cols-2 gap-4 text-center">
+                        <div>
+                            <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Total Items</div>
+                            <div class="text-3xl font-bold text-gray-800" id="stat-total-items">0</div>
+                        </div>
+                        <div>
+                            <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Total Value</div>
+                            <div class="text-3xl font-bold text-green-600">฿<span id="stat-total-value">0</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Data Management -->
+                <div class="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 space-y-4">
+                    <h4 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Data Management</h4>
+                    
+                    <button id="exportCsvBtn" class="w-full py-3 bg-gray-50 hover:bg-green-50 text-gray-700 hover:text-green-700 rounded-xl font-bold text-xs border border-gray-200 transition-colors flex items-center justify-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                        Export CSV
+                    </button>
+                    
+                    <div class="grid grid-cols-2 gap-3">
+                        <label class="cursor-pointer w-full py-3 bg-gray-50 hover:bg-blue-50 text-gray-700 hover:text-blue-700 rounded-xl font-bold text-xs border border-gray-200 transition-colors flex items-center justify-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                            Import CSV
+                            <input type="file" id="importCsvInput" class="hidden" accept=".csv">
+                        </label>
+                        <button id="clearDataBtn" class="w-full py-3 bg-red-50 hover:bg-red-100 text-red-500 hover:text-red-700 rounded-xl font-bold text-xs border border-red-100 transition-colors">
+                            Clear All Data
+                        </button>
+                    </div>
+                </div>
+
+                 <!-- Activity Log -->
+                 <div class="space-y-3">
+                    <h4 class="text-xs font-bold text-gray-400 uppercase tracking-widest px-1">Recent Activity</h4>
+                    <div id="activityLogList" class="space-y-2">
+                        <!-- Logs injected here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT SECTION: Input Form (Main on Mobile) -->
+        <div id="input-section" class="w-full md:w-3/5 flex flex-col bg-white relative overflow-hidden h-full">
+            
+            <!-- DISPLAY ZONE -->
+            <div class="flex-none bg-green-50/50 border-b border-green-100 p-6 flex flex-col justify-end items-end min-h-[160px] relative transition-all">
+                <div class="absolute top-4 left-4 flex gap-2">
+                     <span id="display-badge-cat" class="hidden px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-gray-200 text-gray-500">Category</span>
+                     <span id="display-badge-store" class="hidden px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-gray-200 text-gray-500">Store</span>
+                </div>
+
+                <!-- Dynamic Info -->
+                <div class="w-full text-right space-y-1">
+                    <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Price Per Unit</div>
+                    <div class="text-2xl font-bold text-green-600" id="display-ppu">0.00 <span class="text-xs text-green-400">฿/unit</span></div>
+                </div>
+
+                <!-- Main Price Display -->
+                <div class="flex items-baseline gap-1 mt-2">
+                    <span class="text-2xl font-medium text-gray-400">฿</span>
+                    <div class="text-6xl md:text-7xl font-bold text-gray-900 tracking-tighter leading-none transition-all" id="display-price">0</div>
+                </div>
+                
+                <div class="text-sm font-medium text-gray-400 mt-1">
+                    <span id="display-units">1</span> <span id="display-unit-type">units</span>
+                </div>
+            </div>
+
+            <!-- INPUT ZONE -->
+            <div class="input-zone flex flex-col p-4 md:p-8 bg-white space-y-6">
+                
+                <!-- 1. ITEM NAME (Moved to Top) -->
+                <div class="space-y-2">
+                    <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Item Name</label>
+                    <input type="text" id="input-name" placeholder="e.g. Jasmine Rice 5kg" class="w-full p-4 bg-gray-50 rounded-2xl text-sm font-semibold text-gray-800 border-2 border-transparent focus:border-green-500 outline-none transition-all">
+                </div>
+
+                <!-- 2. CATEGORY SELECTOR -->
+                <div class="space-y-2">
+                    <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Category</label>
+                    <div class="grid grid-cols-2 gap-3" id="category-selector">
+                        <button type="button" data-type="Food" class="cat-btn btn-press py-3 md:py-4 rounded-2xl bg-yellow-50 text-yellow-600 border-2 border-transparent hover:bg-yellow-100 flex items-center justify-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v5m0-18h7a2 2 0 012 2v11a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h7" />
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M10 3a1 1 0 011-1h2a1 1 0 011 1" />
+                            </svg>
+                            <span class="font-bold text-xs uppercase">Food</span>
+                        </button>
+                        <button type="button" data-type="Grocery" class="cat-btn btn-press py-3 md:py-4 rounded-2xl bg-red-50 text-red-600 border-2 border-transparent hover:bg-red-100 flex items-center justify-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                            </svg>
+                            <span class="font-bold text-xs uppercase">Grocery</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 3. STORE INPUT -->
+                <div class="space-y-2">
+                    <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Store</label>
+                    <input type="text" id="input-store" placeholder="Enter store name..." class="w-full p-3 mb-2 bg-gray-50 rounded-xl text-xs font-semibold text-gray-700 border-2 border-transparent focus:border-green-500 outline-none">
+                    <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1" id="store-selector">
+                        <button type="button" onclick="setStore('Makro')" class="store-btn btn-press px-4 py-2 rounded-xl bg-gray-50 text-gray-600 text-[10px] font-bold uppercase border border-gray-200 hover:bg-green-50 hover:text-green-600 whitespace-nowrap">Makro</button>
+                        <button type="button" onclick="setStore('Lotus')" class="store-btn btn-press px-4 py-2 rounded-xl bg-gray-50 text-gray-600 text-[10px] font-bold uppercase border border-gray-200 hover:bg-green-50 hover:text-green-600 whitespace-nowrap">Lotus</button>
+                        <button type="button" onclick="setStore('7-11')" class="store-btn btn-press px-4 py-2 rounded-xl bg-gray-50 text-gray-600 text-[10px] font-bold uppercase border border-gray-200 hover:bg-green-50 hover:text-green-600 whitespace-nowrap">7-11</button>
+                        <button type="button" onclick="setStore('Shopee')" class="store-btn btn-press px-4 py-2 rounded-xl bg-gray-50 text-gray-600 text-[10px] font-bold uppercase border border-gray-200 hover:bg-green-50 hover:text-green-600 whitespace-nowrap">Shopee</button>
+                        <button type="button" onclick="setStore('Lazada')" class="store-btn btn-press px-4 py-2 rounded-xl bg-gray-50 text-gray-600 text-[10px] font-bold uppercase border border-gray-200 hover:bg-green-50 hover:text-green-600 whitespace-nowrap">Lazada</button>
+                        <button type="button" onclick="setStore('BigC')" class="store-btn btn-press px-4 py-2 rounded-xl bg-gray-50 text-gray-600 text-[10px] font-bold uppercase border border-gray-200 hover:bg-green-50 hover:text-green-600 whitespace-nowrap">BigC</button>
+                    </div>
+                </div>
+
+                <!-- 4. PRICE & UNITS -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="col-span-2 space-y-2">
+                        <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Price (฿)</label>
+                        <input type="number" id="input-price" placeholder="0" class="w-full bg-gray-50 text-gray-900 text-3xl font-bold p-4 rounded-2xl border-2 border-transparent focus:border-green-500 focus:bg-white transition-all outline-none text-center">
+                    </div>
+                    
+                    <!-- Updated Unit Section -->
+                    <div class="space-y-2">
+                        <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Quantity</label>
+                        <div class="flex h-[50px] bg-gray-50 rounded-xl overflow-hidden border-2 border-gray-100">
+                             <button id="unit-dec" class="px-3 bg-white hover:bg-gray-100 text-gray-600 font-bold text-lg border-r border-gray-100 btn-press">-</button>
+                             <input type="number" id="input-unit" value="1" class="flex-1 bg-transparent text-center font-bold text-gray-800 text-sm outline-none">
+                             <button id="unit-inc" class="px-3 bg-white hover:bg-gray-100 text-gray-600 font-bold text-lg border-l border-gray-100 btn-press">+</button>
+                        </div>
+                    </div>
+                    <div class="space-y-2">
+                        <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Unit Type (Opt)</label>
+                        <input type="text" id="input-unit-type" placeholder="unit" class="w-full h-[50px] p-3 bg-gray-50 rounded-xl text-sm font-semibold text-gray-700 border-2 border-transparent focus:border-green-500 outline-none text-center">
+                    </div>
+                </div>
+
+                <!-- 5. DATE & NOTES -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="space-y-2">
+                        <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Date / Ref</label>
+                        <input type="text" id="input-lot" class="w-full p-3 bg-gray-50 rounded-xl text-xs font-semibold text-gray-700 border-2 border-transparent focus:border-green-500 outline-none">
+                    </div>
+                    <div class="space-y-2">
+                        <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Notes</label>
+                        <input type="text" id="input-notes" placeholder="Optional" class="w-full p-3 bg-gray-50 rounded-xl text-xs font-semibold text-gray-700 border-2 border-transparent focus:border-green-500 outline-none">
+                    </div>
+                </div>
+
+                <!-- Action Button -->
+                <div class="pt-2">
+                    <button id="saveBtn" class="w-full py-4 bg-green-600 text-white rounded-2xl font-bold text-lg shadow-lg shadow-green-200 btn-press flex items-center justify-center gap-2">
+                        <span>Save Price</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed top-6 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full bg-gray-800 text-white text-xs font-bold shadow-xl transform -translate-y-20 opacity-0 transition-all pointer-events-none z-[100] uppercase tracking-wider">
+        Saved
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="confirmModal" class="fixed inset-0 bg-gray-900/80 flex items-center justify-center z-[110] hidden p-6 backdrop-blur-sm opacity-0 transition-opacity duration-200">
+        <div class="bg-white p-6 rounded-3xl shadow-2xl w-full max-w-sm text-center transform scale-95 transition-transform duration-200">
+            <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">🗑️</div>
+            <h3 class="text-lg font-bold text-gray-900 mb-2">Delete Price?</h3>
+            <p class="text-xs text-gray-500 mb-6 leading-relaxed">This action cannot be undone.</p>
+            <div class="flex gap-3">
+                <button id="cancelDeleteBtn" class="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold text-xs btn-press">Cancel</button>
+                <button id="confirmDeleteBtn" class="flex-1 py-3 bg-red-500 text-white rounded-xl font-bold text-xs shadow-md btn-press">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- State Management ---
+        let inventory = JSON.parse(localStorage.getItem('Items')) || [];
+        let logActivity = JSON.parse(localStorage.getItem('ActivityLog')) || [];
+        let editIndex = -1;
+        
+        // --- DOM Elements ---
+        const els = {
+            views: {
+                input: document.getElementById('input-section'),
+                history: document.getElementById('side-section'), // Container for history/dash on mobile
+                historyInner: document.getElementById('history-container'),
+                dashboardInner: document.getElementById('dashboard-container')
+            },
+            tabs: {
+                mInput: document.getElementById('tab-m-input'),
+                mHistory: document.getElementById('tab-m-history'),
+                mDash: document.getElementById('tab-m-dashboard'),
+                dHistory: document.getElementById('tab-history'),
+                dDash: document.getElementById('tab-dashboard')
+            },
+            input: {
+                price: document.getElementById('input-price'),
+                unit: document.getElementById('input-unit'),
+                unitType: document.getElementById('input-unit-type'),
+                name: document.getElementById('input-name'),
+                store: document.getElementById('input-store'),
+                lot: document.getElementById('input-lot'),
+                notes: document.getElementById('input-notes'),
+                catBtns: document.querySelectorAll('.cat-btn'),
+                unitInc: document.getElementById('unit-inc'),
+                unitDec: document.getElementById('unit-dec'),
+                saveBtn: document.getElementById('saveBtn')
+            },
+            display: {
+                price: document.getElementById('display-price'),
+                ppu: document.getElementById('display-ppu'),
+                units: document.getElementById('display-units'),
+                unitType: document.getElementById('display-unit-type'),
+                badgeCat: document.getElementById('display-badge-cat'),
+                badgeStore: document.getElementById('display-badge-store')
+            },
+            list: document.getElementById('inventoryList'),
+            search: {
+                input: document.getElementById('searchInput'),
+                clear: document.getElementById('clearSearchBtn'),
+                sortLatest: document.getElementById('sortLatestOnTop'),
+                radios: document.getElementsByName('searchType')
+            },
+            dash: {
+                totalItems: document.getElementById('stat-total-items'),
+                totalValue: document.getElementById('stat-total-value'),
+                log: document.getElementById('activityLogList')
+            },
+            modal: {
+                confirm: document.getElementById('confirmModal'),
+                confirmBtn: document.getElementById('confirmDeleteBtn'),
+                cancelBtn: document.getElementById('cancelDeleteBtn')
+            }
+        };
+
+        // --- Init ---
+        document.addEventListener('DOMContentLoaded', () => {
+            // Set default date
+            const today = new Date();
+            els.input.lot.value = today.toISOString().split('T')[0];
+            
+            renderInventory();
+            renderDashboard();
+            calculateDisplay();
+            
+            // Check screen size for initial view
+            if(window.innerWidth < 768) switchView('input');
+        });
+
+        // --- Core Logic ---
+        
+        // Navigation
+        window.switchView = (view) => {
+            // Reset active tabs
+            document.querySelectorAll('[id^="tab-m-"]').forEach(el => el.classList.remove('tab-active'));
+            document.querySelectorAll('[id^="tab-"]').forEach(el => {
+                 if(!el.id.includes('m-')) el.classList.remove('tab-active');
+            });
+
+            // Mobile Logic
+            if (window.innerWidth < 768) {
+                if (view === 'input') {
+                    // Explicitly hide sidebar, show input
+                    els.views.history.classList.add('mobile-hidden');
+                    els.views.input.classList.remove('mobile-hidden');
+                    els.views.input.style.display = 'flex';
+                    els.tabs.mInput.classList.add('tab-active');
+                } else {
+                    // Explicitly hide input, show sidebar
+                    els.views.input.classList.add('mobile-hidden');
+                    els.views.input.style.display = 'none';
+                    els.views.history.classList.remove('mobile-hidden');
+                    els.views.history.classList.add('mobile-view');
+                    
+                    if (view === 'history') {
+                        els.views.historyInner.classList.remove('hidden');
+                        els.views.dashboardInner.classList.add('hidden');
+                        els.tabs.mHistory.classList.add('tab-active');
+                    } else {
+                        els.views.dashboardInner.classList.remove('hidden');
+                        els.views.historyInner.classList.add('hidden');
+                        els.tabs.mDash.classList.add('tab-active');
+                    }
+                }
+            } else {
+                // Desktop Logic (Sidebar always visible)
+                els.views.input.classList.remove('mobile-hidden');
+                els.views.history.classList.remove('mobile-hidden');
+                
+                if (view === 'history') {
+                    els.views.historyInner.classList.remove('hidden');
+                    els.views.dashboardInner.classList.add('hidden');
+                    els.tabs.dHistory.classList.add('tab-active');
+                } else if (view === 'dashboard') {
+                    els.views.dashboardInner.classList.remove('hidden');
+                    els.views.historyInner.classList.add('hidden');
+                    els.tabs.dDash.classList.add('tab-active');
+                }
+            }
+        };
+
+        window.addEventListener('resize', () => {
+             if(window.innerWidth < 768) switchView('input');
+             else switchView('history');
+        });
+
+        // Input Handling
+        let currentCat = 'Food';
+        
+        // Setup Category Buttons
+        els.input.catBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                currentCat = btn.dataset.type;
+                updateSelectors();
+            });
+        });
+
+        // Helper to set store from chips
+        window.setStore = (name) => {
+            els.input.store.value = name;
+            updateSelectors(); // updates display badge
+        };
+        
+        // Listen to custom store typing to update badge in real-time
+        els.input.store.addEventListener('input', () => {
+            updateSelectors();
+        });
+
+        function updateSelectors() {
+            // Cat Styling
+            els.input.catBtns.forEach(b => {
+                const type = b.dataset.type;
+                if(type === currentCat) {
+                    b.classList.add('ring-2', 'ring-offset-2', 'ring-gray-200');
+                    if(type === 'Food') b.classList.add('bg-yellow-100', 'border-yellow-200'); // Yellow active
+                    else b.classList.add('bg-red-100', 'border-red-200'); // Red active
+                } else {
+                    b.classList.remove('ring-2', 'ring-offset-2', 'ring-gray-200', 'bg-yellow-100', 'border-yellow-200', 'bg-red-100', 'border-red-200');
+                }
+            });
+
+            // Badge Update
+            els.display.badgeCat.innerText = currentCat;
+            els.display.badgeCat.className = currentCat === 'Food' 
+                ? 'px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-yellow-100 text-yellow-600'
+                : 'px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-red-100 text-red-600';
+            els.display.badgeCat.classList.remove('hidden');
+
+            const storeVal = els.input.store.value;
+            if(storeVal) {
+                els.display.badgeStore.innerText = storeVal;
+                els.display.badgeStore.classList.remove('hidden');
+            } else {
+                els.display.badgeStore.classList.add('hidden');
+            }
+        }
+
+        // Calculation Logic
+        const calculateDisplay = () => {
+            const price = parseFloat(els.input.price.value) || 0;
+            const units = parseInt(els.input.unit.value) || 1;
+            const unitType = els.input.unitType.value.trim() || 'unit';
+            
+            const ppu = units > 0 ? (price / units) : 0;
+            
+            els.display.price.innerText = price > 0 ? price : '0';
+            els.display.units.innerText = units;
+            els.display.unitType.innerText = unitType;
+            els.display.ppu.innerHTML = `${ppu.toFixed(2)} <span class="text-xs text-green-300">฿/${unitType}</span>`;
+        };
+
+        els.input.price.addEventListener('input', calculateDisplay);
+        els.input.unit.addEventListener('input', calculateDisplay);
+        els.input.unitType.addEventListener('input', calculateDisplay);
+        
+        els.input.unitInc.addEventListener('click', () => {
+            els.input.unit.value = parseInt(els.input.unit.value) + 1;
+            calculateDisplay();
+        });
+        
+        els.input.unitDec.addEventListener('click', () => {
+            const v = parseInt(els.input.unit.value);
+            if(v > 1) els.input.unit.value = v - 1;
+            calculateDisplay();
+        });
+
+        // CRUD Logic
+        els.input.saveBtn.addEventListener('click', () => {
+            const name = els.input.name.value.trim();
+            const price = parseFloat(els.input.price.value);
+            const units = parseInt(els.input.unit.value);
+            const unitType = els.input.unitType.value.trim() || 'unit';
+            const store = els.input.store.value.trim();
+            
+            if(!name || !price) {
+                showToast('Please enter Name and Price', 'red');
+                return;
+            }
+
+            const item = {
+                id: editIndex === -1 ? crypto.randomUUID() : inventory[editIndex].id,
+                name,
+                price,
+                unitQuantity: units,
+                unitType: unitType,
+                category: currentCat,
+                store: store,
+                lot: els.input.lot.value,
+                notes: els.input.notes.value,
+                lastUpdated: Date.now()
+            };
+
+            if(editIndex !== -1) {
+                inventory[editIndex] = item;
+                addLog('Updated', item.name);
+                editIndex = -1;
+                els.input.saveBtn.innerHTML = '<span>Save Price</span>';
+            } else {
+                inventory.push(item);
+                addLog('Added', item.name);
+            }
+
+            saveState();
+            renderInventory();
+            renderDashboard();
+            resetForm();
+            showToast('Saved Successfully', 'green');
+            
+            // On mobile, switch to list to see result
+            if(window.innerWidth < 768) switchView('history');
+        });
+
+        function resetForm() {
+            els.input.name.value = '';
+            els.input.price.value = '';
+            els.input.unit.value = '1';
+            els.input.unitType.value = '';
+            els.input.store.value = '';
+            els.input.notes.value = '';
+            currentCat = 'Food';
+            updateSelectors();
+            calculateDisplay();
+        }
+
+        // List Rendering
+        function renderInventory() {
+            els.list.innerHTML = '';
+            const search = els.search.input.value.toLowerCase();
+            const searchType = document.getElementById('searchContains').checked ? 'contains' : 'prefix';
+            const sortLatest = els.search.sortLatest.checked;
+
+            // Grouping logic
+            const groups = {};
+            inventory.forEach(item => {
+                if(!groups[item.name]) groups[item.name] = [];
+                groups[item.name].push(item);
+            });
+
+            // Filter Groups
+            let visibleGroups = Object.keys(groups).filter(name => {
+                if(!search) return true;
+                if(searchType === 'prefix') return name.toLowerCase().startsWith(search);
+                return name.toLowerCase().includes(search) || groups[name].some(i => (i.store || '').toLowerCase().includes(search));
+            });
+
+            if(sortLatest) {
+                visibleGroups.sort((a,b) => {
+                    const latestA = Math.max(...groups[a].map(i => i.lastUpdated));
+                    const latestB = Math.max(...groups[b].map(i => i.lastUpdated));
+                    return latestB - latestA;
+                });
+            } else {
+                visibleGroups.sort();
+            }
+
+            if(visibleGroups.length === 0) {
+                els.list.innerHTML = '<div class="text-center text-gray-400 text-xs mt-10">No items found.</div>';
+                return;
+            }
+
+            visibleGroups.forEach(name => {
+                const items = groups[name];
+                // Find lowest PPU
+                const lowest = items.reduce((prev, curr) => {
+                    const prevPPU = prev.price / prev.unitQuantity;
+                    const currPPU = curr.price / curr.unitQuantity;
+                    return currPPU < prevPPU ? curr : prev;
+                });
+                const lowestPPU = (lowest.price / lowest.unitQuantity).toFixed(2);
+                const lowestUnit = lowest.unitType || 'unit';
+
+                const card = document.createElement('div');
+                card.className = 'bg-white rounded-2xl border border-gray-100 shadow-sm p-4 animate-fade-in';
+                
+                // Color coding for list items based on requested theme
+                const catColor = items[0].category === 'Food' ? 'text-yellow-600 bg-yellow-50' : 'text-red-600 bg-red-50';
+                const catIcon = items[0].category === 'Food' 
+                    ? `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v5m0-18h7a2 2 0 012 2v11a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h7" /><path stroke-linecap="round" stroke-linejoin="round" d="M10 3a1 1 0 011-1h2a1 1 0 011 1" /></svg>` 
+                    : `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" /></svg>`;
+
+                let html = `
+                    <div class="flex justify-between items-start mb-3">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-xl ${catColor} flex items-center justify-center">${catIcon}</div>
+                            <div>
+                                <h4 class="font-bold text-gray-800 text-sm leading-tight">${name}</h4>
+                                <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">Best: <span class="text-green-600">฿${lowestPPU}/${lowestUnit}</span> @ ${lowest.store || '?'}</div>
+                            </div>
+                        </div>
+                        <button onclick="prefillAdd('${name}')" class="w-8 h-8 rounded-full bg-gray-50 text-gray-400 hover:bg-green-50 hover:text-green-600 flex items-center justify-center transition-colors">
+                            <span class="text-lg font-bold">+</span>
+                        </button>
+                    </div>
+                    <div class="space-y-2">
+                `;
+
+                // Sort items by date desc
+                items.sort((a,b) => b.lastUpdated - a.lastUpdated).forEach(item => {
+                    const ppu = (item.price / item.unitQuantity).toFixed(2);
+                    const unitName = item.unitType || 'unit';
+                    const isBest = ppu === lowestPPU;
+                    html += `
+                        <div class="flex justify-between items-center p-2 rounded-xl ${isBest ? 'bg-green-50/50 border border-green-100' : 'bg-gray-50 border border-transparent'}">
+                            <div class="flex flex-col">
+                                <span class="text-xs font-bold text-gray-700">฿${item.price} <span class="text-gray-400 font-normal">(${item.unitQuantity} ${unitName})</span></span>
+                                <span class="text-[9px] text-gray-400">${item.store || 'No Store'} • ${item.lot}</span>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <span class="text-[10px] font-bold ${isBest ? 'text-green-600' : 'text-gray-400'}">฿${ppu}/${unitName}</span>
+                                <div class="flex gap-1">
+                                    <button onclick="editItem('${item.id}')" class="text-blue-400 hover:text-blue-600"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg></button>
+                                    <button onclick="deleteItem('${item.id}')" class="text-red-400 hover:text-red-600"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                html += `</div>`;
+                card.innerHTML = html;
+                els.list.appendChild(card);
+            });
+        }
+
+        // Action Helpers
+        window.prefillAdd = (name) => {
+            els.input.name.value = name;
+            els.input.price.focus();
+            switchView('input');
+        };
+
+        window.editItem = (id) => {
+            const idx = inventory.findIndex(i => i.id === id);
+            if(idx === -1) return;
+            editIndex = idx;
+            const item = inventory[idx];
+            
+            els.input.name.value = item.name;
+            els.input.price.value = item.price;
+            els.input.unit.value = item.unitQuantity;
+            els.input.unitType.value = item.unitType || '';
+            els.input.lot.value = item.lot;
+            els.input.notes.value = item.notes || '';
+            els.input.store.value = item.store || '';
+            
+            currentCat = item.category || 'Food';
+            updateSelectors();
+            calculateDisplay();
+            
+            els.input.saveBtn.innerHTML = '<span>Update Price</span>';
+            switchView('input');
+        };
+
+        let deleteId = null;
+        window.deleteItem = (id) => {
+            deleteId = id;
+            els.modal.confirm.classList.remove('hidden');
+            setTimeout(() => {
+                els.modal.confirm.classList.remove('opacity-0');
+                els.modal.confirm.children[0].classList.remove('scale-95');
+                els.modal.confirm.children[0].classList.add('scale-100');
+            }, 10);
+        };
+
+        els.modal.cancelBtn.addEventListener('click', closeDeleteModal);
+        els.modal.confirmBtn.addEventListener('click', () => {
+            if(deleteId) {
+                const idx = inventory.findIndex(i => i.id === deleteId);
+                if(idx > -1) {
+                    addLog('Deleted', inventory[idx].name);
+                    inventory.splice(idx, 1);
+                    saveState();
+                    renderInventory();
+                    renderDashboard();
+                    showToast('Deleted', 'red');
+                }
+            }
+            closeDeleteModal();
+        });
+
+        function closeDeleteModal() {
+            els.modal.confirm.classList.add('opacity-0');
+            els.modal.confirm.children[0].classList.remove('scale-100');
+            els.modal.confirm.children[0].classList.add('scale-95');
+            setTimeout(() => els.modal.confirm.classList.add('hidden'), 200);
+        }
+
+        // Dashboard Rendering
+        function renderDashboard() {
+            els.dash.totalItems.innerText = inventory.length;
+            const totalVal = inventory.reduce((acc, curr) => acc + curr.price, 0);
+            els.dash.totalValue.innerText = totalVal.toLocaleString();
+
+            els.dash.log.innerHTML = '';
+            logActivity.slice(0, 10).forEach(log => {
+                const row = document.createElement('div');
+                row.className = 'flex justify-between items-center text-xs p-2 bg-white rounded-lg border border-gray-100';
+                
+                let colorClass = 'bg-gray-100 text-gray-500';
+                if(log.action === 'Added') colorClass = 'bg-green-100 text-green-600';
+                if(log.action === 'Updated') colorClass = 'bg-blue-100 text-blue-600';
+                if(log.action === 'Deleted') colorClass = 'bg-red-100 text-red-600';
+
+                const date = new Date(log.timestamp);
+                
+                row.innerHTML = `
+                    <div class="flex items-center gap-2">
+                        <span class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${colorClass}">${log.action}</span>
+                        <span class="font-medium text-gray-700 truncate max-w-[100px]">${log.item}</span>
+                    </div>
+                    <span class="text-[9px] text-gray-400">${date.toLocaleDateString()}</span>
+                `;
+                els.dash.log.appendChild(row);
+            });
+        }
+
+        // Search Events
+        els.search.input.addEventListener('input', () => {
+            renderInventory();
+            if(els.search.input.value) els.search.clear.classList.remove('hidden');
+            else els.search.clear.classList.add('hidden');
+        });
+        els.search.clear.addEventListener('click', () => {
+            els.search.input.value = '';
+            els.search.clear.classList.add('hidden');
+            renderInventory();
+        });
+        els.search.sortLatest.addEventListener('change', renderInventory);
+        document.querySelectorAll('input[name="searchType"]').forEach(r => r.addEventListener('change', renderInventory));
+
+        // Data Management
+        document.getElementById('exportCsvBtn').addEventListener('click', () => {
+            if(inventory.length === 0) return showToast('No data to export', 'red');
+            const headers = 'Name,Price,Units,UnitType,Category,Store,Lot,Notes,LastUpdated\n';
+            const rows = inventory.map(i => `"${i.name}",${i.price},${i.unitQuantity},"${i.unitType || 'unit'}","${i.category}","${i.store}","${i.lot}","${i.notes || ''}",${i.lastUpdated}`).join('\n');
+            const blob = new Blob([headers + rows], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `prices_${Date.now()}.csv`;
+            a.click();
+        });
+
+        document.getElementById('importCsvInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if(!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const text = event.target.result;
+                const lines = text.split('\n').slice(1); // skip header
+                let added = 0;
+                lines.forEach(line => {
+                    if(!line.trim()) return;
+                    // Simple CSV parse
+                    const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/); 
+                    if(cols.length >= 6) {
+                        const clean = s => s ? s.replace(/^"|"$/g, '') : '';
+                        inventory.push({
+                            id: crypto.randomUUID(),
+                            name: clean(cols[0]),
+                            price: parseFloat(cols[1]),
+                            unitQuantity: parseInt(cols[2]) || 1,
+                            unitType: clean(cols[3]) || 'unit', // Add unitType support
+                            category: clean(cols[4]),
+                            store: clean(cols[5]),
+                            lot: clean(cols[6]),
+                            notes: clean(cols[7]),
+                            lastUpdated: parseInt(cols[8]) || Date.now()
+                        });
+                        added++;
+                    }
+                });
+                saveState();
+                renderInventory();
+                renderDashboard();
+                showToast(`Imported ${added} items`, 'green');
+            };
+            reader.readAsText(file);
+            e.target.value = '';
+        });
+
+        document.getElementById('clearDataBtn').addEventListener('click', () => {
+            if(confirm('Are you sure you want to clear ALL data?')) {
+                inventory = [];
+                logActivity = [];
+                saveState();
+                renderInventory();
+                renderDashboard();
+                showToast('All data cleared', 'red');
+            }
+        });
+
+        // Utils
+        function saveState() {
+            localStorage.setItem('Items', JSON.stringify(inventory));
+            localStorage.setItem('ActivityLog', JSON.stringify(logActivity));
+        }
+
+        function addLog(action, item) {
+            logActivity.unshift({
+                action,
+                item,
+                timestamp: Date.now()
+            });
+            if(logActivity.length > 50) logActivity.pop();
+        }
+
+        function showToast(msg, color) {
+            const t = document.getElementById('toast');
+            t.innerText = msg;
+            t.className = `fixed top-6 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full text-white text-xs font-bold shadow-xl transform transition-all pointer-events-none z-[100] uppercase tracking-wider ${color === 'red' ? 'bg-red-500' : 'bg-gray-800'}`;
+            t.classList.remove('-translate-y-20', 'opacity-0');
+            setTimeout(() => t.classList.add('-translate-y-20', 'opacity-0'), 2500);
+        }
+
+        // Init Setup
+        updateSelectors();
+    </script>
+</body>
+</html>
