@@ -78,9 +78,9 @@
         
         <!-- Mobile Tabs (Top Fixed) -->
         <div class="md:hidden flex bg-white border-b border-gray-100 flex-none z-50 pt-[env(safe-area-inset-top)]">
-            <button onclick="switchView('input')" id="tab-m-input" class="flex-1 py-4 text-[11px] font-bold text-gray-400 tab-active uppercase tracking-wider touch-manipulation">Add Price</button>
-            <button onclick="switchView('history')" id="tab-m-history" class="flex-1 py-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider touch-manipulation">List</button>
-            <button onclick="switchView('dashboard')" id="tab-m-dashboard" class="flex-1 py-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider touch-manipulation">Dashboard</button>
+            <button onclick="switchView('input')" ondblclick="resetForm(); showToast('New Item', 'blue')" id="tab-m-input" class="flex-1 py-4 text-[11px] font-bold text-gray-400 tab-active uppercase tracking-wider touch-manipulation select-none">Add Price</button>
+            <button onclick="switchView('history')" id="tab-m-history" class="flex-1 py-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider touch-manipulation select-none">List</button>
+            <button onclick="switchView('dashboard')" id="tab-m-dashboard" class="flex-1 py-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider touch-manipulation select-none">Dashboard</button>
         </div>
 
         <!-- LEFT SECTION: List & Dashboard (Sidebar on Desktop) -->
@@ -233,13 +233,13 @@
                 <div class="space-y-2">
                     <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Store</label>
                     <input type="text" id="input-store" placeholder="Enter store name..." class="w-full p-3 mb-2 bg-gray-50 rounded-xl text-xs font-semibold text-gray-700 border-2 border-transparent focus:border-green-500 outline-none">
-                    <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1" id="store-selector">
-                        <button type="button" onclick="setStore('Makro')" class="store-btn btn-press px-4 py-2 rounded-xl bg-gray-50 text-gray-600 text-[10px] font-bold uppercase border border-gray-200 hover:bg-green-50 hover:text-green-600 whitespace-nowrap">Makro</button>
-                        <button type="button" onclick="setStore('Lotus')" class="store-btn btn-press px-4 py-2 rounded-xl bg-gray-50 text-gray-600 text-[10px] font-bold uppercase border border-gray-200 hover:bg-green-50 hover:text-green-600 whitespace-nowrap">Lotus</button>
-                        <button type="button" onclick="setStore('7-11')" class="store-btn btn-press px-4 py-2 rounded-xl bg-gray-50 text-gray-600 text-[10px] font-bold uppercase border border-gray-200 hover:bg-green-50 hover:text-green-600 whitespace-nowrap">7-11</button>
-                        <button type="button" onclick="setStore('Shopee')" class="store-btn btn-press px-4 py-2 rounded-xl bg-gray-50 text-gray-600 text-[10px] font-bold uppercase border border-gray-200 hover:bg-green-50 hover:text-green-600 whitespace-nowrap">Shopee</button>
-                        <button type="button" onclick="setStore('Lazada')" class="store-btn btn-press px-4 py-2 rounded-xl bg-gray-50 text-gray-600 text-[10px] font-bold uppercase border border-gray-200 hover:bg-green-50 hover:text-green-600 whitespace-nowrap">Lazada</button>
-                        <button type="button" onclick="setStore('BigC')" class="store-btn btn-press px-4 py-2 rounded-xl bg-gray-50 text-gray-600 text-[10px] font-bold uppercase border border-gray-200 hover:bg-green-50 hover:text-green-600 whitespace-nowrap">BigC</button>
+                    <div class="grid grid-cols-3 gap-2" id="store-selector">
+                        <button type="button" onclick="setStore('Makro')" class="store-btn btn-press py-2 rounded-xl bg-gray-50 text-gray-600 text-[10px] font-bold uppercase border border-gray-200 hover:bg-green-50 hover:text-green-600 whitespace-nowrap">Makro</button>
+                        <button type="button" onclick="setStore('Lotus')" class="store-btn btn-press py-2 rounded-xl bg-gray-50 text-gray-600 text-[10px] font-bold uppercase border border-gray-200 hover:bg-green-50 hover:text-green-600 whitespace-nowrap">Lotus</button>
+                        <button type="button" onclick="setStore('7-11')" class="store-btn btn-press py-2 rounded-xl bg-gray-50 text-gray-600 text-[10px] font-bold uppercase border border-gray-200 hover:bg-green-50 hover:text-green-600 whitespace-nowrap">7-11</button>
+                        <button type="button" onclick="setStore('Shopee')" class="store-btn btn-press py-2 rounded-xl bg-gray-50 text-gray-600 text-[10px] font-bold uppercase border border-gray-200 hover:bg-green-50 hover:text-green-600 whitespace-nowrap">Shopee</button>
+                        <button type="button" onclick="setStore('Lazada')" class="store-btn btn-press py-2 rounded-xl bg-gray-50 text-gray-600 text-[10px] font-bold uppercase border border-gray-200 hover:bg-green-50 hover:text-green-600 whitespace-nowrap">Lazada</button>
+                        <button type="button" onclick="setStore('BigC')" class="store-btn btn-press py-2 rounded-xl bg-gray-50 text-gray-600 text-[10px] font-bold uppercase border border-gray-200 hover:bg-green-50 hover:text-green-600 whitespace-nowrap">BigC</button>
                     </div>
                 </div>
 
@@ -247,7 +247,7 @@
                 <div class="grid grid-cols-2 gap-4">
                     <div class="col-span-2 space-y-2">
                         <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Price (฿)</label>
-                        <input type="number" id="input-price" placeholder="0" class="w-full bg-gray-50 text-gray-900 text-3xl font-bold p-4 rounded-2xl border-2 border-transparent focus:border-green-500 focus:bg-white transition-all outline-none text-center">
+                        <input type="number" id="input-price" inputmode="decimal" placeholder="0" class="w-full bg-gray-50 text-gray-900 text-3xl font-bold p-4 rounded-2xl border-2 border-transparent focus:border-green-500 focus:bg-white transition-all outline-none text-center">
                     </div>
                     
                     <!-- Updated Unit Section -->
@@ -255,7 +255,7 @@
                         <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Quantity</label>
                         <div class="flex h-[50px] bg-gray-50 rounded-xl overflow-hidden border-2 border-gray-100">
                              <button id="unit-dec" class="px-3 bg-white hover:bg-gray-100 text-gray-600 font-bold text-lg border-r border-gray-100 btn-press">-</button>
-                             <input type="number" id="input-unit" value="1" class="flex-1 bg-transparent text-center font-bold text-gray-800 text-sm outline-none">
+                             <input type="number" id="input-unit" inputmode="numeric" value="1" class="flex-1 bg-transparent text-center font-bold text-gray-800 text-sm outline-none">
                              <button id="unit-inc" class="px-3 bg-white hover:bg-gray-100 text-gray-600 font-bold text-lg border-l border-gray-100 btn-press">+</button>
                         </div>
                     </div>
@@ -395,6 +395,7 @@
                 if (view === 'input') {
                     // Explicitly hide sidebar, show input
                     els.views.history.classList.add('mobile-hidden');
+                    els.views.history.classList.remove('mobile-view');
                     els.views.input.classList.remove('mobile-hidden');
                     els.views.input.style.display = 'flex';
                     els.tabs.mInput.classList.add('tab-active');
@@ -861,7 +862,7 @@
         function showToast(msg, color) {
             const t = document.getElementById('toast');
             t.innerText = msg;
-            t.className = `fixed top-6 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full text-white text-xs font-bold shadow-xl transform transition-all pointer-events-none z-[100] uppercase tracking-wider ${color === 'red' ? 'bg-red-500' : 'bg-gray-800'}`;
+            t.className = `fixed top-6 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full text-white text-xs font-bold shadow-xl transform transition-all pointer-events-none z-[100] uppercase tracking-wider ${color === 'red' ? 'bg-red-500' : (color === 'blue' ? 'bg-blue-500' : 'bg-gray-800')}`;
             t.classList.remove('-translate-y-20', 'opacity-0');
             setTimeout(() => t.classList.add('-translate-y-20', 'opacity-0'), 2500);
         }
