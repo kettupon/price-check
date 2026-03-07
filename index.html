@@ -724,7 +724,7 @@
     <!-- MAIN LOGIC -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, limit, doc, updateDoc, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, limit, doc, updateDoc, deleteDoc, serverTimestamp, setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
         // FIREBASE CONFIG FROM USER
@@ -887,6 +887,23 @@
             onSnapshot(qLogs, (snapshot) => {
                 logActivity = snapshot.docs.map(doc => doc.data());
                 renderDashboard();
+            });
+
+            // Groups Listener
+            onSnapshot(doc(db, "app_data", "groups"), (docSnap) => {
+                if (docSnap.exists() && docSnap.data().groupsJSON) {
+                    try {
+                        const parsed = JSON.parse(docSnap.data().groupsJSON);
+                        itemGroups = parsed;
+                        localStorage.setItem('item_groups', docSnap.data().groupsJSON);
+                        renderGroups();
+                        // Refresh all groups modal list if open
+                        const allGroupsModal = document.getElementById('allGroupsModal');
+                        if (allGroupsModal && !allGroupsModal.classList.contains('hidden')) {
+                            filterAllGroupsList();
+                        }
+                    } catch (e) { console.error("Error parsing groups", e); }
+                }
             });
         }
 
@@ -1058,8 +1075,16 @@
         };
 
         // --- Group Management ---
-        function saveGroups() {
-            localStorage.setItem('item_groups', JSON.stringify(itemGroups));
+        async function saveGroups() {
+            const groupsStr = JSON.stringify(itemGroups);
+            localStorage.setItem('item_groups', groupsStr);
+            if (!isOffline) {
+                try {
+                    await setDoc(doc(db, 'app_data', 'groups'), { groupsJSON: groupsStr }, { merge: true });
+                } catch (e) {
+                    console.error("Error saving groups to Firebase", e);
+                }
+            }
         }
 
         let _groupNameCallback = null;
