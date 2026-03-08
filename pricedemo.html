@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>DealHunter Prototype</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700;800&display=swap');
+
+        body {
+            font-family: 'Noto Sans Thai', sans-serif;
+        }
+
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        .pb-safe {
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
+        .animate-fade-in {
+            animation: fadeIn 0.3s ease-out forwards;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+    <!-- React & Babel via CDN -->
+    <script type="importmap">
+      {
+        "imports": {
+          "react": "https://esm.sh/react@18.2.0",
+          "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+          "lucide-react": "https://esm.sh/lucide-react@0.294.0",
+          "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
+          "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"
+        }
+      }
+    </script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+
+<body class="bg-stone-100">
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import {
+            MapPin, Users, Tag, AlertCircle, Plus, Trophy, Heart, MessageSquare,
+            Share2, Search, Zap, Home, ListPlus, Calculator, ChevronLeft, Image as ImageIcon,
+            Coffee, ShoppingCart, Store, Package, User, X, ShoppingBag, ImageOff
+        } from 'lucide-react';
+        import { initializeApp } from 'firebase/app';
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyByDvi-wyekFdKMiMv_Cb2yUq9yF0Tw3Uc",
+            authDomain: "price-check-86915.firebaseapp.com",
+            projectId: "price-check-86915",
+            storageBucket: "price-check-86915.firebasestorage.app",
+            messagingSenderId: "510258152666",
+            appId: "1:510258152666:web:bc24bd3f34e704488e91e3"
+        };
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // --- Live Firebase Data State Only ---
+
+        function App() {
+            const [currentView, setCurrentView] = useState('feed'); // 'feed' | 'search' | 'add' | 'profile' | 'product_detail'
+            const [activeTab, setActiveTab] = useState('ทั้งหมด');
+            const [profileTab, setProfileTab] = useState('posts'); // 'posts' | 'likes'
+            const [showDuplicatePrompt, setShowDuplicatePrompt] = useState(false);
+            const [deals, setDeals] = useState([]);
+            const [groupedDeals, setGroupedDeals] = useState([]);
+            const [searchQuery, setSearchQuery] = useState('');
+            const [selectedProduct, setSelectedProduct] = useState(null);
+            const [zoomedImage, setZoomedImage] = useState(null); // Image URL for full screen zoom
+
+            const ImagePlaceholder = () => (
+                <div className="w-full h-full flex flex-col items-center justify-center bg-gray-100/80 text-gray-400">
+                    <ImageOff size={24} className="mb-1" />
+                    <span className="text-[10px] font-bold">ไม่มีรูปภาพ</span>
+                </div>
+            );
+
+            // --- Firebase Fetch ---
+            useEffect(() => {
+                const q = query(collection(db, "items"), orderBy("lastUpdated", "desc"));
+                const unsubscribe = onSnapshot(q, (snapshot) => {
+                    const fbDeals = snapshot.docs.map(doc => {
+                        const data = doc.data();
+
+                        // Calculate PPU properly from raw numeric data
+                        const numPrice = parseFloat(data.price) || 0;
+                        const numCashback = data.cashbackUsed ? (parseFloat(data.cashbackAmount) || 0) : 0;
+                        const totalPrice = Math.max(0, numPrice - numCashback);
+                        const unitQty = parseInt(data.unitQuantity) || 1;
+                        const ppu = totalPrice / unitQty;
+
+                        return {
+                            id: doc.id,
+                            name: data.name,
+                            brand: data.brand || "",
+                            price: data.price, // Raw price
+                            ppu: ppu, // Price Per Unit
+                            totalPrice: totalPrice, // Price after cashback
+                            unitQuantity: unitQty,
+                            unitType: data.unitType || "ชิ้น",
+                            normalPrice: Math.round(data.price * 1.2), // Mock normal price based on 20% off
+                            shop: data.store || "ไม่ระบุร้าน",
+                            distance: "? km",
+                            type: data.category || "General",
+                            masterImage: data.masterImage || "",
+                            stickers: ppu < 10 ? ["🔥 คุ้มสุด!"] : [],
+                            likes: Math.floor(Math.random() * 50),
+                            comments: Math.floor(Math.random() * 10),
+                            image: data.image || "", // Empty if no image
+                            timePosted: new Date(data.lastUpdated).toLocaleTimeString(),
+                            reporter: "Live User",
+                            cashbackUsed: data.cashbackUsed || false
+                        };
+                    });
+                    setDeals(fbDeals);
+
+                    // Create Grouped Deals for Feed/Search
+                    const grouped = {};
+                    fbDeals.forEach(deal => {
+                        const name = deal.name || 'Unknown';
+                        if (!grouped[name]) {
+                            grouped[name] = {
+                                id: deal.id,
+                                name: name,
+                                brand: deal.brand,
+                                category: deal.category,
+                                masterImage: deal.masterImage || deal.image,
+                                lowestPrice: deal.price,
+                                lowestPpu: deal.ppu, // Use PPU for Best Value
+                                lowestPpuUnit: deal.unitType,
+                                normalPrice: deal.normalPrice,
+                                postsCount: 1,
+                                stickers: deal.stickers
+                            };
+                        } else {
+                            grouped[name].postsCount += 1;
+                            grouped[name].lowestPrice = Math.min(grouped[name].lowestPrice, deal.price);
+                            grouped[name].lowestPpu = Math.min(grouped[name].lowestPpu, deal.ppu);
+                            if (deal.masterImage && (!grouped[name].masterImage || grouped[name].masterImage === grouped[name].image)) {
+                                grouped[name].masterImage = deal.masterImage;
+                            }
+                        }
+                    });
+                    setGroupedDeals(Object.values(grouped));
+                });
+                return () => unsubscribe();
+            }, []);
+
+            // --- State สำหรับหน้า Add Deal (Tracker Form) ---
+            const [itemName, setItemName] = useState('');
+            const [brand, setBrand] = useState('');
+            const [category, setCategory] = useState('Grocery');
+            const [store, setStore] = useState('');
+            const [price, setPrice] = useState('');
+            const [unit, setUnit] = useState(1);
+            const [unitType, setUnitType] = useState('ชิ้น');
+            const [shippingType, setShippingType] = useState(null); // 'included', 'excluded', null
+            const [shippingFee, setShippingFee] = useState('');
+            const [usePromo, setUsePromo] = useState(false);
+            const [useCashback, setUseCashback] = useState(false);
+            const [cashbackAmount, setCashbackAmount] = useState('');
+
+            // คำนวณ PPU (Price Per Unit) Real-time
+            const numPrice = parseFloat(price) || 0;
+            const numCashback = useCashback ? (parseFloat(cashbackAmount) || 0) : 0;
+            const totalPrice = Math.max(0, numPrice - numCashback);
+            const ppu = unit > 0 ? (totalPrice / unit) : 0;
+
+            // --- Handlers ---
+            const handleSaveDeal = async () => {
+                if (!itemName || !price) {
+                    alert('กรุณากรอกชื่อสินค้าและราคา');
+                    return;
+                }
+                try {
+                    await addDoc(collection(db, "items"), {
+                        name: itemName,
+                        brand: brand,
+                        category: category,
+                        store: store,
+                        price: parseFloat(price),
+                        unitQuantity: parseInt(unit) || 1,
+                        unitType: unitType,
+                        cashbackUsed: useCashback,
+                        cashbackAmount: useCashback ? (parseFloat(cashbackAmount) || 0) : 0,
+                        lastUpdated: Date.now()
+                    });
+                    setShowDuplicatePrompt(true);
+                } catch (e) {
+                    console.error(e);
+                    alert("Error saving: " + e.message);
+                }
+            };
+
+            const handlePromptAction = () => {
+                setShowDuplicatePrompt(false);
+                setCurrentView('feed'); // กลับไปหน้าหลัก
+                // Reset Form
+                setItemName(''); setBrand(''); setPrice(''); setUnit(1); setStore(''); setUseCashback(false); setCashbackAmount('');
+            };
+
+            // --- Views Components ---
+            const renderProfile = () => (
+                <div className="flex-1 overflow-y-auto bg-gray-50 pb-24 animate-fade-in">
+                    {/* Profile Header */}
+                    <div className="bg-white p-6 border-b border-gray-100 flex flex-col items-center">
+                        <div className="w-24 h-24 bg-gradient-to-br from-orange-400 to-red-500 rounded-full flex items-center justify-center text-white text-4xl font-bold shadow-lg mb-3 border-4 border-white outline outline-gray-100">
+                            G
+                        </div>
+                        <h2 className="text-xl font-bold text-gray-800">Get_Hunter</h2>
+                        <div className="flex items-center gap-2 mt-2">
+                            <span className="px-3 py-1 bg-yellow-100 text-yellow-700 text-xs font-bold rounded-full flex items-center gap-1">
+                                <Trophy size={12} /> Searcher
+                            </span>
+                            <span className="text-sm text-gray-500 font-medium">1,250 Pts</span>
+                        </div>
+
+                        {/* Quick Stats */}
+                        <div className="flex gap-6 mt-6 w-full justify-center">
+                            <div className="text-center">
+                                <div className="text-2xl font-bold text-gray-800">12</div>
+                                <div className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">บอกต่อ</div>
+                            </div>
+                            <div className="w-px bg-gray-200"></div>
+                            <div className="text-center">
+                                <div className="text-2xl font-bold text-gray-800">348</div>
+                                <div className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">ถูกใจรวม</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Profile Tabs */}
+                    <div className="flex bg-white border-b border-gray-100 sticky top-0 z-10">
+                        <button
+                            onClick={() => setProfileTab('posts')}
+                            className={`flex-1 py-4 text-sm font-bold transition-colors border-b-2 ${profileTab === 'posts' ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-400 hover:bg-gray-50'}`}
+                        >
+                            โพสต์บอกต่อ (1)
+                        </button>
+                        <button
+                            onClick={() => setProfileTab('likes')}
+                            className={`flex-1 py-4 text-sm font-bold transition-colors border-b-2 ${profileTab === 'likes' ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-400 hover:bg-gray-50'}`}
+                        >
+                            ที่ถูกใจ (2)
+                        </button>
+                    </div>
+
+                    {/* Profile Feed List */}
+                    <div className="p-4 space-y-3">
+                        {deals.filter(d => profileTab === 'posts' ? d.reporter === 'Get_Hunter' : true).map((deal, idx) => (
+                            <div key={deal.id + idx} className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex gap-3 relative overflow-hidden">
+                                <div className="w-24 h-24 rounded-xl bg-gray-100 flex-shrink-0 overflow-hidden">
+                                    {deal.image ? <img src={deal.image} alt={deal.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
+                                </div>
+                                <div className="flex-1 flex flex-col justify-between py-1">
+                                    <div>
+                                        <h4 className="font-bold text-gray-800 text-sm leading-tight line-clamp-2">{deal.name}</h4>
+                                        <div className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+                                            <MapPin size={10} /> {deal.shop}
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-between items-end">
+                                        <div className="text-lg font-bold text-red-500">฿{deal.price}</div>
+                                        <div className="flex items-center gap-3 text-xs text-gray-400">
+                                            <span className="flex items-center gap-1">
+                                                <Heart size={14} className={profileTab === 'likes' ? 'fill-red-500 text-red-500' : ''} /> {deal.likes}
+                                            </span>
+                                            <span className="flex items-center gap-1">
+                                                <MessageSquare size={14} /> {deal.comments}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                        {profileTab === 'posts' && deals.filter(d => d.reporter === 'Get_Hunter').length === 0 && (
+                            <div className="text-center text-gray-400 py-10 text-sm">ยังไม่มีโพสต์บอกต่อ</div>
+                        )}
+                    </div>
+                </div>
+            );
+
+            const renderFeed = () => (
+                <div className="flex-1 overflow-y-auto p-3 bg-gray-100 pb-24 animate-fade-in">
+                    {/* Categories / Tabs */}
+                    <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-3 mb-1">
+                        {['ทั้งหมด', 'ใกล้ฉัน (5km)', 'สกินแคร์', 'ของกิน', 'ของใช้ในบ้าน'].map(tab => (
+                            <button
+                                key={tab}
+                                onClick={() => setActiveTab(tab)}
+                                className={`whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-bold transition-colors shadow-sm ${activeTab === tab
+                                    ? 'bg-orange-500 text-white'
+                                    : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+                                    }`}
+                            >
+                                {tab}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                        {groupedDeals.map(deal => (
+                            <div key={deal.id} onClick={() => { setSelectedProduct(deal); setCurrentView('product_detail'); }} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden flex flex-col hover:shadow-md transition-shadow cursor-pointer">
+                                <div className="relative aspect-square bg-gray-200 flex-shrink-0">
+                                    {deal.masterImage ? <img src={deal.masterImage} alt={deal.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
+                                    <div className="absolute top-1 left-1 flex flex-col gap-0.5">
+                                        {deal.stickers && deal.stickers.map((sticker, idx) => (
+                                            <span key={idx} className={`px-1.5 py-0.5 text-[9px] font-bold rounded shadow-sm ${idx === 0 ? 'bg-red-500 text-white' : 'bg-green-500 text-white'
+                                                }`}>
+                                                {sticker}
+                                            </span>
+                                        ))}
+                                    </div>
+                                    <div className="absolute bottom-0 right-0 bg-white/90 backdrop-blur px-1.5 py-0.5 rounded-tl-lg font-bold text-orange-500 flex flex-col items-end shadow-sm">
+                                        <span className="text-[9px] text-gray-400 line-through leading-none">฿{deal.normalPrice}</span>
+                                        <span className="text-xs leading-none mt-0.5">คุ้มสุด ฿{deal.lowestPpu?.toFixed(2)}/{deal.lowestPpuUnit}</span>
+                                    </div>
+                                </div>
+                                <div className="p-2 flex-1 flex flex-col">
+                                    <h3 className="font-bold text-gray-800 text-[11px] leading-tight mb-1 line-clamp-2 min-h-[1.5rem]">{deal.name}</h3>
+                                    <div className="mt-auto pt-1 border-t border-gray-50 flex items-center justify-between gap-1 text-[9px] text-gray-500">
+                                        <div className="flex items-center gap-1">
+                                            <ShoppingBag size={10} className="shrink-0 text-orange-400" />
+                                            <span className="truncate">{deal.postsCount} โพสต์ชี้เป้า</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+
+            const renderAddDeal = () => (
+                <div className="flex-1 flex flex-col bg-white overflow-hidden animate-fade-in relative z-0 pb-20">
+                    {/* DISPLAY ZONE (PPU Calculator) */}
+                    <div className="flex-none bg-green-50/50 border-b border-green-100 p-6 flex flex-col justify-end items-end min-h-[160px] relative transition-all shadow-inner">
+                        <div className="absolute top-4 left-4 flex gap-2">
+                            <span className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-yellow-100 text-yellow-600">
+                                {category}
+                            </span>
+                            {store && (
+                                <span className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-gray-200 text-gray-600">
+                                    {store}
+                                </span>
+                            )}
+                        </div>
+
+                        <div className="w-full text-right space-y-1">
+                            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">ราคาต่อหน่วย (PPU)</div>
+                            <div className="text-2xl font-bold text-green-600">
+                                {ppu.toFixed(2)} <span className="text-xs text-green-400">฿/{unitType || 'unit'}</span>
+                            </div>
+                        </div>
+
+                        <div className="flex items-baseline gap-1 mt-2">
+                            <span className="text-2xl font-medium text-gray-400">฿</span>
+                            <div className="text-6xl font-bold text-gray-900 tracking-tighter leading-none">{price || '0'}</div>
+                        </div>
+                        <div className="text-sm font-medium text-gray-400 mt-1">
+                            {unit} {unitType || 'units'}
+                        </div>
+
+                        {useCashback && cashbackAmount > 0 && (
+                            <div className="mt-2 text-right">
+                                <span className="text-[10px] font-bold text-orange-400 uppercase tracking-widest">หักส่วนลดแล้วเหลือ</span>
+                                <div className="text-xl font-bold text-orange-500">฿{totalPrice}</div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* INPUT ZONE */}
+                    <div className="flex-1 overflow-y-auto p-4 space-y-6">
+
+                        {/* Name */}
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">ชื่อสินค้า</label>
+                            <input
+                                type="text" placeholder="เช่น กระดาษทิชชู่ Scott หนา 3 ชั้น" value={itemName} onChange={(e) => setItemName(e.target.value)}
+                                className="w-full p-4 bg-gray-50 rounded-2xl text-sm font-semibold text-gray-800 border-2 border-transparent focus:border-green-500 outline-none transition-all"
+                            />
+                        </div>
+
+                        {/* Brand */}
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">ยี่ห้อ (Optional)</label>
+                            <input
+                                type="text" placeholder="เช่น Scott, Mizumi" value={brand} onChange={(e) => setBrand(e.target.value)}
+                                className="w-full p-4 bg-gray-50 rounded-2xl text-sm font-semibold text-gray-800 border-2 border-transparent focus:border-green-500 outline-none transition-all"
+                            />
+                        </div>
+
+                        {/* Category */}
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">หมวดหมู่</label>
+                            <div className="grid grid-cols-2 gap-3">
+                                <button onClick={() => setCategory('Food')} className={`py-3 rounded-2xl flex items-center justify-center gap-2 border-2 transition-all ${category === 'Food' ? 'bg-yellow-50 text-yellow-600 border-yellow-200' : 'bg-gray-50 text-gray-400 border-transparent hover:bg-gray-100'}`}>
+                                    <Coffee size={20} /> <span className="font-bold text-xs uppercase">ของกิน</span>
+                                </button>
+                                <button onClick={() => setCategory('Grocery')} className={`py-3 rounded-2xl flex items-center justify-center gap-2 border-2 transition-all ${category === 'Grocery' ? 'bg-red-50 text-red-600 border-red-200' : 'bg-gray-50 text-gray-400 border-transparent hover:bg-gray-100'}`}>
+                                    <ShoppingCart size={20} /> <span className="font-bold text-xs uppercase">ของใช้</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Store Quick Select */}
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">เจอที่ร้านไหน?</label>
+                            <input
+                                type="text" placeholder="พิมพ์ชื่อร้าน หรือเลือกจากด้านล่าง" value={store} onChange={(e) => setStore(e.target.value)}
+                                className="w-full p-3 mb-2 bg-gray-50 rounded-xl text-sm font-semibold text-gray-700 border-2 border-transparent focus:border-green-500 outline-none"
+                            />
+                            <div className="flex flex-wrap gap-2">
+                                {['Watsons', '7-11', 'Lotus', 'Makro', 'Shopee', 'Lazada'].map(s => (
+                                    <button
+                                        key={s} onClick={() => setStore(s)}
+                                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase border transition-colors ${store === s ? 'bg-green-50 text-green-600 border-green-200' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
+                                    >
+                                        {s}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Price & Quantity */}
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="col-span-2 space-y-2">
+                                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">ราคา (฿)</label>
+                                <input
+                                    type="number" placeholder="0" value={price} onChange={(e) => setPrice(e.target.value)}
+                                    className="w-full bg-gray-50 text-gray-900 text-3xl font-bold p-4 rounded-2xl border-2 border-transparent focus:border-green-500 focus:bg-white transition-all outline-none text-center"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">จำนวน</label>
+                                <div className="flex h-[50px] bg-gray-50 rounded-xl overflow-hidden border-2 border-gray-100">
+                                    <button onClick={() => setUnit(Math.max(1, unit - 1))} className="px-4 bg-white hover:bg-gray-100 text-gray-600 font-bold text-lg border-r border-gray-100">-</button>
+                                    <input type="number" value={unit} onChange={(e) => setUnit(parseInt(e.target.value) || 1)} className="flex-1 bg-transparent text-center font-bold text-gray-800 text-sm outline-none" />
+                                    <button onClick={() => setUnit(unit + 1)} className="px-4 bg-white hover:bg-gray-100 text-gray-600 font-bold text-lg border-l border-gray-100">+</button>
+                                </div>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">หน่วย (ชิ้น/แพค)</label>
+                                <input type="text" value={unitType} onChange={(e) => setUnitType(e.target.value)} className="w-full h-[50px] p-3 bg-gray-50 rounded-xl text-sm font-semibold text-gray-700 border-2 border-transparent focus:border-green-500 outline-none text-center" />
+                            </div>
+                        </div>
+
+                        {/* Cashback / Promo Toggle */}
+                        <div className="p-4 bg-orange-50/50 border border-orange-100 rounded-2xl space-y-3">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" checked={useCashback} onChange={(e) => setUseCashback(e.target.checked)} className="rounded text-orange-500 focus:ring-orange-500 w-4 h-4" />
+                                <span className="text-xs font-bold text-orange-600 flex items-center gap-1"><Zap size={14} /> มีส่วนลดเพิ่ม / เงินคืน (Cashback)</span>
+                            </label>
+                            {useCashback && (
+                                <input
+                                    type="number" placeholder="ส่วนลด (฿)" value={cashbackAmount} onChange={(e) => setCashbackAmount(e.target.value)}
+                                    className="w-full p-3 bg-white rounded-xl text-sm font-semibold text-orange-600 border-2 border-orange-200 outline-none"
+                                />
+                            )}
+                        </div>
+
+                        {/* Photo Upload */}
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">แนบรูปภาพสินค้า</label>
+                            <button className="w-full h-[60px] rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 hover:bg-gray-100 flex items-center justify-center gap-2 transition-colors">
+                                <ImageIcon size={20} className="text-gray-400" />
+                                <span className="text-xs font-bold text-gray-500">แตะเพื่อถ่ายรูปป้ายราคา</span>
+                            </button>
+                        </div>
+
+                        {/* Action Button */}
+                        <div className="pt-4 pb-8">
+                            <button onClick={handleSaveDeal} className="w-full py-4 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-2xl font-bold text-lg shadow-lg shadow-green-200 active:scale-95 transition-transform flex items-center justify-center gap-2">
+                                <ListPlus size={20} /> โพสต์บอกต่อเพื่อนๆ
+                            </button>
+                        </div>
+
+                    </div>
+                </div>
+            );
+
+            // --- Views Components: Search ---
+            const renderSearch = () => {
+                const searchResults = groupedDeals.filter(deal => {
+                    const q = searchQuery.toLowerCase();
+                    return (
+                        (deal.name && deal.name.toLowerCase().includes(q)) ||
+                        (deal.brand && deal.brand.toLowerCase().includes(q)) ||
+                        (deal.category && deal.category.toLowerCase().includes(q))
+                    );
+                });
+
+                return (
+                    <div className="flex-1 flex flex-col bg-gray-100 overflow-hidden animate-fade-in relative z-0 pb-20">
+                        {/* Search Input Area */}
+                        <div className="bg-white p-4 border-b border-gray-200 shadow-sm z-10">
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    placeholder="พิมพ์ค้นหาสินค้า, ร้านค้า, หมวดหมู่..."
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className="w-full py-2.5 pl-10 pr-4 bg-gray-50 rounded-xl text-sm font-medium text-gray-800 focus:outline-none border-2 border-transparent focus:border-orange-500 transition-colors"
+                                />
+                                <Search className="absolute left-3 top-3 text-gray-400" size={18} />
+                                {searchQuery && (
+                                    <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3 text-gray-400 hover:text-gray-600">
+                                        <AlertCircle size={18} />
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Search Results Area */}
+                        <div className="flex-1 overflow-y-auto p-3">
+                            {searchQuery ? (
+                                <div>
+                                    <h3 className="text-xs font-bold text-gray-500 mb-3 ml-1 uppercase tracking-wider">พบ {searchResults.length} รายการ</h3>
+                                    {searchResults.length > 0 ? (
+                                        <div className="grid grid-cols-2 gap-3 pb-6">
+                                            {searchResults.map(deal => (
+                                                <div key={deal.id} onClick={() => { setSelectedProduct(deal); setCurrentView('product_detail'); }} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden flex flex-col hover:shadow-md transition-shadow cursor-pointer">
+                                                    <div className="relative aspect-square bg-gray-200 flex-shrink-0">
+                                                        {deal.masterImage ? <img src={deal.masterImage} alt={deal.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
+                                                        <div className="absolute bottom-0 right-0 bg-white/90 backdrop-blur px-1.5 py-0.5 rounded-tl-lg font-bold text-orange-500 flex flex-col items-end shadow-sm">
+                                                            <span className="text-[9px] text-gray-400 line-through leading-none">฿{deal.normalPrice}</span>
+                                                            <span className="text-xs leading-none mt-0.5">คุ้มสุด ฿{deal.lowestPpu?.toFixed(2)}/{deal.lowestPpuUnit}</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="p-2 flex-1 flex flex-col">
+                                                        <h3 className="font-bold text-gray-800 text-[11px] leading-tight mb-1 line-clamp-2 min-h-[1.5rem]">{deal.name}</h3>
+                                                        <div className="mt-auto pt-1 border-t border-gray-50 flex items-center justify-between gap-1 text-[9px] text-gray-500">
+                                                            <div className="flex items-center gap-1">
+                                                                <ShoppingBag size={10} className="shrink-0 text-orange-400" />
+                                                                <span className="truncate">{deal.postsCount} โพสต์ชี้เป้า</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="text-center py-10 flex flex-col items-center">
+                                            <AlertCircle size={40} className="text-gray-300 mb-3" />
+                                            <div className="text-gray-500 text-sm font-medium">ไม่พบสินค้าที่คุณค้นหา</div>
+                                            <div className="text-gray-400 text-xs mt-1">ลองเปลี่ยนคำค้นหา หรือค้นหาด้วยหมวดหมู่</div>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="flex flex-col items-center justify-center text-gray-400 py-10">
+                                    <Search size={40} className="mb-4 text-gray-300" />
+                                    <h2 className="text-lg font-bold text-gray-600 mb-2">ค้นหาสินค้า</h2>
+                                    <p className="text-xs text-center text-gray-500 mb-6 leading-relaxed">ค้นหาสินค้าราคาถูกที่สุด<br />จากหลากหลายร้านค้ารอบตัวคุณ</p>
+
+                                    <div className="w-full bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                                        <h3 className="text-xs font-bold text-gray-600 mb-3 text-left">หมวดหมู่ยอดฮิต</h3>
+                                        <div className="flex flex-wrap gap-2">
+                                            {['ของใช้ในบ้าน', 'สกินแคร์', 'อาหาร', 'เครื่องดื่ม', 'ขนม'].map(tag => (
+                                                <button key={tag} onClick={() => setSearchQuery(tag)} className="px-3 py-1.5 bg-gray-50 hover:bg-orange-50 text-gray-600 hover:text-orange-600 rounded-lg text-[10px] font-bold border border-gray-200 hover:border-orange-200 transition-colors">
+                                                    {tag}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            };
+
+            // --- Views Components: Product Detail ---
+            const renderProductDetail = () => {
+                if (!selectedProduct) return null;
+
+                // Find all deals with same name, sort by PPU ascending
+                const productDeals = deals
+                    .filter(d => d.name === selectedProduct.name)
+                    .sort((a, b) => a.ppu - b.ppu);
+
+                return (
+                    <div className="flex-1 flex flex-col bg-gray-100 overflow-hidden animate-fade-in relative z-0 pb-20">
+                        {/* Header */}
+                        <div className="bg-white p-4 border-b border-gray-200 shadow-sm z-10 sticky top-0 flex items-center gap-3">
+                            <button onClick={() => setCurrentView('feed')} className="p-2 -ml-2 text-gray-400 hover:text-gray-600">
+                                <ChevronLeft size={24} />
+                            </button>
+                            <h2 className="text-lg font-bold text-gray-800 truncate flex-1">รายละเอียดสินค้า</h2>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto pb-24">
+                            {/* Product Image & Info */}
+                            <div className="bg-white p-4 mb-2 flex gap-4 shadow-sm">
+                                <div className="w-24 h-24 rounded-xl border border-gray-100 flex-shrink-0 overflow-hidden bg-gray-50">
+                                    {selectedProduct.masterImage ? <img src={selectedProduct.masterImage} alt={selectedProduct.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
+                                </div>
+                                <div className="flex-1 flex flex-col">
+                                    <h3 className="font-bold text-gray-800 text-sm leading-tight mb-1">{selectedProduct.name}</h3>
+                                    {selectedProduct.brand && <div className="text-xs text-gray-500 mb-2 font-medium">ยี่ห้อ: {selectedProduct.brand}</div>}
+
+                                    {/* Admin Description */}
+                                    {selectedProduct.description && (
+                                        <div className="text-xs text-gray-600 mb-2 bg-gray-50 p-2 rounded-lg border border-gray-100">
+                                            <span className="font-bold text-gray-700 block mb-0.5">รายละเอียดสินค้า:</span>
+                                            {selectedProduct.description}
+                                        </div>
+                                    )}
+
+                                    <div className="mt-auto">
+                                        <div className="text-xs text-orange-600 font-bold bg-orange-50 px-2 py-1 rounded inline-block">
+                                            เริ่มคุ้มสุดที่ ฿{productDeals[0]?.ppu?.toFixed(2)} ต่อ {productDeals[0]?.unitType}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Report List */}
+                            <div className="px-4 py-3">
+                                <h3 className="text-xs font-bold text-gray-500 mb-3 uppercase tracking-wider">โพสต์และราคาจากผู้ใช้ ({productDeals.length})</h3>
+                                <div className="space-y-3">
+                                    {productDeals.map(deal => (
+                                        <div key={deal.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col gap-2 relative overflow-hidden">
+                                            {/* Medal for cheapest */}
+                                            {deal.id === productDeals[0].id && (
+                                                <div className="absolute top-0 right-0 bg-yellow-400 text-white text-[9px] font-bold px-2 py-0.5 rounded-bl-lg shadow-sm">ถูกที่สุด!</div>
+                                            )}
+
+                                            <div className="flex items-start gap-3">
+                                                {/* Original User Store Uploaded Image - Clickable */}
+                                                <div
+                                                    className="w-16 h-16 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden border border-gray-200 cursor-pointer hover:opacity-80 transition-opacity"
+                                                    onClick={() => { if (deal.image) setZoomedImage(deal.image) }}
+                                                >
+                                                    {deal.image ? <img src={deal.image} alt={deal.shop} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
+                                                </div>
+
+                                                <div className="flex-1 flex justify-between items-start">
+                                                    <div>
+                                                        <div className="font-bold text-gray-800 text-base">฿{deal.price} <span className="text-xs font-normal text-gray-500">({deal.unitQuantity} {deal.unitType})</span></div>
+                                                        <div className="text-xs font-bold text-orange-500 mt-0.5">ตกชิ้นละ ฿{deal.ppu?.toFixed(2)}</div>
+                                                        {deal.cashbackUsed && <div className="text-[10px] text-green-500 font-bold bg-green-50 px-1 py-0.5 rounded leading-none mt-1 inline-block">หักแคชแบ็กแล้ว</div>}
+                                                    </div>
+                                                    <div className="flex flex-col items-end mt-1">
+                                                        <div className="flex items-center gap-1 text-xs text-gray-600 font-bold bg-gray-50 px-2 py-1 rounded border border-gray-100">
+                                                            <Store size={12} className="text-gray-400" /> {deal.shop}
+                                                        </div>
+                                                        <div className="text-[10px] text-gray-400 mt-2">{deal.timePosted} โดย {deal.reporter}</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="border-t border-gray-50 pt-2 mt-1 flex items-center justify-between">
+                                                <span className="text-[10px] text-gray-400 font-medium bg-gray-100 px-2 py-0.5 rounded-full">{deal.category || 'General'}</span>
+                                                <div className="flex items-center gap-3 text-xs text-gray-400">
+                                                    <span className="flex items-center gap-1"><Heart size={14} /> {deal.likes}</span>
+                                                    <span className="flex items-center gap-1"><MessageSquare size={14} /> {deal.comments}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Fixed Add Price Button */}
+                        <div className="fixed bottom-[85px] inset-x-0 px-4 max-w-md mx-auto z-20">
+                            <button
+                                onClick={() => {
+                                    setItemName(selectedProduct.name);
+                                    setBrand(selectedProduct.brand || '');
+                                    setCategory(selectedProduct.category || 'Grocery');
+                                    setCurrentView('add');
+                                }}
+                                className="w-full bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 transform active:scale-95 transition-transform"
+                            >
+                                <ListPlus size={18} /> บอกต่อราคาใหม่สำหรับสินค้านี้
+                            </button>
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-900 flex justify-center font-sans">
+                    <div className="w-full max-w-md bg-gray-100 shadow-2xl relative overflow-hidden flex flex-col h-[100dvh]">
+
+                        {/* --- Header (Shared) --- */}
+                        <header className="bg-gradient-to-r from-orange-500 via-orange-600 to-red-500 text-white p-4 rounded-b-2xl shadow-md z-10 flex-none">
+                            <div className="flex justify-between items-center mb-3">
+                                <h1 className="text-2xl font-bold flex items-center gap-2">
+                                    <Zap className="fill-current" /> DealHunter
+                                </h1>
+                                <div className="flex items-center gap-2 bg-black/20 px-3 py-1 rounded-full backdrop-blur-sm">
+                                    <Trophy size={16} className="text-yellow-300" />
+                                    <span className="text-sm font-medium">Rank: Searcher</span>
+                                </div>
+                            </div>
+
+                            <div className="text-sm font-medium text-white/80 animate-fade-in flex items-center gap-1">
+                                {currentView === 'feed' && <><Home size={16} /> หน้าแรก</>}
+                                {currentView === 'search' && <><Search size={16} /> ค้นหา</>}
+                                {currentView === 'add' && <><Calculator size={16} /> เครื่องมือเช็คราคาและบอกต่อ</>}
+                                {currentView === 'profile' && <><User size={16} /> โปรไฟล์ส่วนตัว</>}
+                            </div>
+                            {currentView === 'profile' && (
+                                <div className="text-sm font-medium text-white/80 animate-fade-in flex items-center gap-1">
+                                    <User size={16} /> โปรไฟล์ส่วนตัว
+                                </div>
+                            )}
+                        </header>
+
+                        {/* --- MAIN CONTENT AREA --- */}
+                        {currentView === 'feed' && renderFeed()}
+                        {currentView === 'search' && renderSearch()}
+                        {currentView === 'add' && renderAddDeal()}
+                        {currentView === 'profile' && renderProfile()}
+                        {currentView === 'product_detail' && renderProductDetail()}
+
+                        {/* --- FAB (Only in Feed View) --- */}
+                        {currentView === 'feed' && (
+                            <button
+                                onClick={() => setCurrentView('add')}
+                                className="absolute bottom-20 right-6 bg-gradient-to-br from-green-400 to-green-600 text-white p-4 rounded-full shadow-lg shadow-green-200 hover:scale-105 transform transition-all flex items-center justify-center z-20 border-2 border-white"
+                            >
+                                <Plus size={24} />
+                            </button>
+                        )}
+
+                        {/* --- Bottom Navigation --- */}
+                        <nav className="absolute bottom-0 w-full bg-white border-t border-gray-200 flex justify-around py-3 pb-safe z-30 text-xs text-gray-500 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
+                            <button
+                                onClick={() => setCurrentView('feed')}
+                                className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'feed' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}
+                            >
+                                <Home size={20} className={currentView === 'feed' ? 'fill-current' : ''} /> หน้าแรก
+                            </button>
+                            <button
+                                onClick={() => setCurrentView('search')}
+                                className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'search' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}
+                            >
+                                <Search size={20} className={currentView === 'search' ? 'border-b-2 border-orange-500 pb-0.5' : ''} /> ค้นหา
+                            </button>
+                            <button
+                                onClick={() => setCurrentView('add')}
+                                className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'add' ? 'text-green-500 font-bold' : 'hover:text-green-400'}`}
+                            >
+                                <ListPlus size={20} /> บอกต่อ
+                            </button>
+                            <button
+                                onClick={() => setCurrentView('profile')}
+                                className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'profile' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}
+                            >
+                                <User size={20} className={currentView === 'profile' ? 'fill-current' : ''} /> โปรไฟล์
+                            </button>
+                        </nav>
+
+                        {/* --- DUPLICATE DETECTION MODAL --- */}
+                        {showDuplicatePrompt && (
+                            <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
+                                <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl">
+                                    <div className="bg-red-50 p-4 border-b border-red-100 flex items-start gap-3">
+                                        <AlertCircle className="text-red-500 flex-shrink-0 mt-1" />
+                                        <div>
+                                            <h3 className="font-bold text-gray-800">พบสินค้าในระบบแล้ว!</h3>
+                                            <p className="text-sm text-gray-600 mt-1">
+                                                มีคนรายงานราคา <span className="font-semibold text-orange-600">{itemName || 'สินค้านี้'}</span> ที่ <span className="font-semibold text-orange-600">{store || 'ร้านนี้'}</span> ไว้เมื่อ 2 ชม. ที่แล้ว
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="p-4 space-y-3">
+                                        <p className="text-sm text-gray-700 font-medium text-center mb-2">
+                                            คุณต้องการทำอะไรกับข้อมูลนี้?
+                                        </p>
+                                        <button onClick={handlePromptAction} className="w-full bg-green-500 hover:bg-green-600 text-white py-3 rounded-xl font-medium transition-colors flex justify-center items-center gap-2 shadow-md">
+                                            <Tag size={18} /> ยืนยันว่าราคานี้จริง! (+10 Pts)
+                                        </button>
+                                        <div className="flex gap-2">
+                                            <button onClick={handlePromptAction} className="flex-1 bg-orange-50 hover:bg-orange-100 text-orange-600 py-2 rounded-xl text-sm font-medium transition-colors border border-orange-100">
+                                                คนละสาขากัน
+                                            </button>
+                                            <button onClick={handlePromptAction} className="flex-1 bg-red-50 hover:bg-red-100 text-red-600 py-2 rounded-xl text-sm font-medium transition-colors border border-red-100">
+                                                อัปเดตราคาใหม่!
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* --- IMAGE ZOOM MODAL --- */}
+                        {zoomedImage && (
+                            <div className="absolute inset-0 bg-black/90 z-50 flex items-center justify-center backdrop-blur-sm animate-fade-in" onClick={() => setZoomedImage(null)}>
+                                <button className="absolute top-6 right-6 text-white/50 hover:text-white bg-black/30 w-10 h-10 rounded-full flex items-center justify-center transition-colors">
+                                    <X size={24} />
+                                </button>
+                                <img src={zoomedImage} alt="Zoomed View" className="w-[90%] max-h-[80%] object-contain rounded-xl shadow-2xl" onClick={e => e.stopPropagation()} />
+                            </div>
+                        )}
+
+                    </div>
+                </div>
+            );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+
+</html>

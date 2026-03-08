@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Price Admin Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700;800&display=swap');
+
+        body {
+            font-family: 'Noto Sans Thai', sans-serif;
+            background-color: #f3f4f6;
+        }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "react": "https://esm.sh/react@18.2.0",
+          "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+          "lucide-react": "https://esm.sh/lucide-react@0.294.0",
+          "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
+          "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"
+        }
+      }
+    </script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { LayoutDashboard, Edit2, Image as ImageIcon, Save, X, Search, AlertCircle, RefreshCw, CheckSquare } from 'lucide-react';
+        import { initializeApp } from 'firebase/app';
+        import { getFirestore, collection, onSnapshot, query, orderBy, doc, updateDoc } from 'firebase/firestore';
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyByDvi-wyekFdKMiMv_Cb2yUq9yF0Tw3Uc",
+            authDomain: "price-check-86915.firebaseapp.com",
+            projectId: "price-check-86915",
+            storageBucket: "price-check-86915.firebasestorage.app",
+            messagingSenderId: "510258152666",
+            appId: "1:510258152666:web:bc24bd3f34e704488e91e3"
+        };
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        function AdminApp() {
+            const [deals, setDeals] = useState([]);
+            const [searchQuery, setSearchQuery] = useState('');
+            const [editingId, setEditingId] = useState(null);
+            const [newImageUrl, setNewImageUrl] = useState('');
+            const [editingDescId, setEditingDescId] = useState(null);
+            const [newDesc, setNewDesc] = useState('');
+            const [expandedGroups, setExpandedGroups] = useState([]); // array of group IDs
+
+            const [adminTab, setAdminTab] = useState('dashboard'); // 'dashboard' | 'merge'
+            const [selectedForMerge, setSelectedForMerge] = useState([]);
+            const [showMergeModal, setShowMergeModal] = useState(false);
+
+            const toggleExpand = (groupId) => {
+                setExpandedGroups(prev =>
+                    prev.includes(groupId) ? prev.filter(id => id !== groupId) : [...prev, groupId]
+                );
+            };
+
+            useEffect(() => {
+                const q = query(collection(db, "items"), orderBy("lastUpdated", "desc"));
+                const unsubscribe = onSnapshot(q, (snapshot) => {
+                    const fbDeals = snapshot.docs.map(doc => ({
+                        id: doc.id,
+                        ...doc.data()
+                    }));
+
+                    // Group by name
+                    const grouped = {};
+                    fbDeals.forEach(deal => {
+                        const name = deal.name || 'Unknown';
+
+                        // Calculate PPU
+                        const numPrice = parseFloat(deal.price) || 0;
+                        const numCashback = deal.cashbackUsed ? (parseFloat(deal.cashbackAmount) || 0) : 0;
+                        const totalPrice = Math.max(0, numPrice - numCashback);
+                        const unitQty = parseInt(deal.unitQuantity) || 1;
+                        const ppu = totalPrice / unitQty;
+                        deal.ppu = ppu; // store on item for later rendering
+
+                        if (!grouped[name]) {
+                            grouped[name] = {
+                                id: deal.id, // reference ID for the group leader
+                                name: name,
+                                brand: deal.brand,
+                                category: deal.category,
+                                masterImage: deal.masterImage || '',
+                                postsCount: 1,
+                                lowestPrice: deal.price,
+                                highestPrice: deal.price,
+                                lowestPpu: ppu,
+                                highestPpu: ppu,
+                                unitType: deal.unitType || 'ชิ้น',
+                                description: deal.description || '',
+                                originalItems: [deal]
+                            };
+                        } else {
+                            grouped[name].postsCount += 1;
+                            grouped[name].originalItems.push(deal);
+                            grouped[name].lowestPrice = Math.min(grouped[name].lowestPrice, deal.price);
+                            grouped[name].highestPrice = Math.max(grouped[name].highestPrice, deal.price);
+                            grouped[name].lowestPpu = Math.min(grouped[name].lowestPpu, ppu);
+                            grouped[name].highestPpu = Math.max(grouped[name].highestPpu, ppu);
+
+                            if (deal.masterImage && !grouped[name].masterImage) {
+                                grouped[name].masterImage = deal.masterImage;
+                            }
+                            if (deal.description && !grouped[name].description) {
+                                grouped[name].description = deal.description;
+                            }
+                        }
+                    });
+
+                    setDeals(Object.values(grouped));
+                });
+                return () => unsubscribe();
+            }, []);
+
+            const handleSaveImage = async (dealGroup) => {
+                try {
+                    // Update all items in this group with the new masterImage
+                    const updatePromises = dealGroup.originalItems.map(item => {
+                        const itemRef = doc(db, "items", item.id);
+                        return updateDoc(itemRef, {
+                            masterImage: newImageUrl
+                        });
+                    });
+
+                    await Promise.all(updatePromises);
+
+                    setEditingId(null);
+                    setNewImageUrl('');
+                } catch (error) {
+                    console.error("Error updating document: ", error);
+                    alert("Failed to update image.");
+                }
+            };
+
+            const handleDeleteImage = async (dealGroup) => {
+                if (!confirm('ยืนยันลบรูปภาพสินค้านี้?')) return;
+                try {
+                    const updatePromises = dealGroup.originalItems.map(item => {
+                        const itemRef = doc(db, "items", item.id);
+                        return updateDoc(itemRef, {
+                            masterImage: ''
+                        });
+                    });
+
+                    await Promise.all(updatePromises);
+                } catch (error) {
+                    console.error("Error omitting image: ", error);
+                    alert("Failed to delete image.");
+                }
+            };
+
+            const startEditing = (dealGroup) => {
+                setEditingId(dealGroup.id);
+                setNewImageUrl(dealGroup.masterImage || '');
+            };
+
+            const handleSaveDesc = async (dealGroup) => {
+                try {
+                    const updatePromises = dealGroup.originalItems.map(item => {
+                        const itemRef = doc(db, "items", item.id);
+                        return updateDoc(itemRef, {
+                            description: newDesc
+                        });
+                    });
+                    await Promise.all(updatePromises);
+                    setEditingDescId(null);
+                    setNewDesc('');
+                } catch (error) {
+                    console.error("Error updating desc: ", error);
+                    alert("Failed to update description.");
+                }
+            };
+
+            const startEditingDesc = (dealGroup) => {
+                setEditingDescId(dealGroup.id);
+                setNewDesc(dealGroup.description || '');
+            };
+
+            const filteredDeals = deals.filter(deal =>
+                (deal.name && deal.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                (deal.brand && deal.brand.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                (deal.store && deal.store.toLowerCase().includes(searchQuery.toLowerCase()))
+            );
+
+            const toggleMergeSelection = (groupId) => {
+                setSelectedForMerge(prev =>
+                    prev.includes(groupId) ? prev.filter(id => id !== groupId) : [...prev, groupId]
+                );
+            };
+
+            const [mergeFinalName, setMergeFinalName] = useState('');
+            const [mergeFinalImage, setMergeFinalImage] = useState('');
+
+            // When Modal Opens, pre-populate options
+            useEffect(() => {
+                if (showMergeModal && selectedForMerge.length > 0) {
+                    const selectedGroups = deals.filter(d => selectedForMerge.includes(d.id));
+                    if (selectedGroups.length > 0) {
+                        setMergeFinalName(selectedGroups[0].name); // Default to first name
+                    }
+                }
+            }, [showMergeModal]);
+
+            const handleMergeConfirm = async () => {
+                if (!mergeFinalName) {
+                    alert('กรุณาระบุชื่อสินค้า Final');
+                    return;
+                }
+
+                try {
+                    const selectedGroups = deals.filter(d => selectedForMerge.includes(d.id));
+
+                    // Gather ALL original item IDs across all selected groups
+                    let allItemIDsToUpdate = [];
+                    selectedGroups.forEach(group => {
+                        group.originalItems.forEach(item => {
+                            allItemIDsToUpdate.push(item.id);
+                        });
+                    });
+
+                    // Update all those original items
+                    const updatePromises = allItemIDsToUpdate.map(id => {
+                        const itemRef = doc(db, "items", id);
+                        return updateDoc(itemRef, {
+                            name: mergeFinalName,
+                            masterImage: mergeFinalImage
+                        });
+                    });
+
+                    await Promise.all(updatePromises);
+
+                    // Cleanup & Success state
+                    setSelectedForMerge([]);
+                    setShowMergeModal(false);
+                    setMergeFinalName('');
+                    setMergeFinalImage('');
+                    alert('รวมข้อมูลเสร็จสิ้น!');
+                    setAdminTab('dashboard'); // take them back after fix
+                } catch (e) {
+                    console.error("Error merging docs: ", e);
+                    alert("Error merging docs: " + e.message);
+                }
+            };
+
+            return (
+                <div className="min-h-screen flex flex-col">
+                    {/* Header */}
+                    <header className="bg-slate-900 text-white p-4 shadow-md sticky top-0 z-10 flex justify-between items-center px-8">
+                        <div className="flex items-center gap-3">
+                            <LayoutDashboard className="text-orange-500" size={28} />
+                            <h1 className="text-xl font-bold">DealHunter <span className="text-orange-500">Admin</span></h1>
+                        </div>
+                        <div className="relative w-96">
+                            <input
+                                type="text" placeholder="ค้นหาสินค้า, ยี่ห้อ, หรือร้านค้า..."
+                                value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+                                className="w-full py-2 pl-10 pr-4 rounded-lg bg-slate-800 border border-slate-700 text-sm text-white focus:outline-none focus:border-orange-500"
+                            />
+                            <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
+                        </div>
+                    </header>
+
+                    {/* Navigation Tabs */}
+                    <div className="bg-white border-b border-gray-200 px-8 flex gap-6">
+                        <button
+                            onClick={() => { setAdminTab('dashboard'); setSelectedForMerge([]); }}
+                            className={`py-4 font-bold text-sm border-b-2 flex items-center gap-2 transition-colors ${adminTab === 'dashboard' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+                        >
+                            <LayoutDashboard size={18} /> ภาพรวม (Dashboard)
+                        </button>
+                        <button
+                            onClick={() => setAdminTab('merge')}
+                            className={`py-4 font-bold text-sm border-b-2 flex items-center gap-2 transition-colors ${adminTab === 'merge' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+                        >
+                            <RefreshCw size={18} /> จัดการข้อมูลซ้ำซ้อน (Merge)
+                            {selectedForMerge.length > 0 && <span className="bg-orange-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{selectedForMerge.length}</span>}
+                        </button>
+                    </div>
+
+                    {/* Content */}
+                    <main className="flex-1 p-8 overflow-y-auto relative">
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                            <table className="w-full text-left text-sm">
+                                <thead className="bg-slate-50 text-slate-600 font-bold border-b border-gray-200">
+                                    <tr>
+                                        {adminTab === 'merge' && <th className="p-4 w-12 text-center">เลือก</th>}
+                                        <th className="p-4 w-20">รูปภาพกลุ่มสินคัา</th>
+                                        <th className="p-4">รายละเอียดสินค้า</th>
+                                        <th className="p-4 w-32 text-right">ช่วงราคา (฿)</th>
+                                        <th className="p-4 w-48">จำนวนโพสต์บอกต่อ</th>
+                                        <th className="p-4 w-40">หมวดหมู่</th>
+                                        {adminTab === 'dashboard' && <th className="p-4 w-48">จัดการรูปรวม</th>}
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {filteredDeals.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={adminTab === 'merge' ? "7" : "6"} className="p-10 text-center text-gray-400">
+                                                <AlertCircle size={32} className="mx-auto mb-2 text-gray-300" />
+                                                ไม่มีข้อมูลสินค้า
+                                            </td>
+                                        </tr>
+                                    ) : filteredDeals.map(dealGroup => (
+                                        <React.Fragment key={dealGroup.id}>
+                                            <tr className={`hover:bg-slate-50 transition-colors border-b border-gray-100 ${selectedForMerge.includes(dealGroup.id) ? 'bg-orange-50/30' : ''}`}>
+                                                {adminTab === 'merge' && (
+                                                    <td className="p-4 text-center">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={selectedForMerge.includes(dealGroup.id)}
+                                                            onChange={() => toggleMergeSelection(dealGroup.id)}
+                                                            className="w-5 h-5 rounded border-gray-300 text-orange-500 focus:ring-orange-500 cursor-pointer"
+                                                        />
+                                                    </td>
+                                                )}
+                                                <td className="p-4 text-center">
+                                                    {dealGroup.masterImage ? (
+                                                        <img src={dealGroup.masterImage} alt={dealGroup.name} className="w-16 h-16 object-cover rounded shadow-sm mx-auto cursor-pointer" onClick={() => toggleExpand(dealGroup.id)} />
+                                                    ) : (
+                                                        <div onClick={() => toggleExpand(dealGroup.id)} className="w-16 h-16 bg-gray-100 rounded flex items-center justify-center text-gray-300 mx-auto border border-gray-200 cursor-pointer">
+                                                            <ImageIcon size={24} />
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className="p-4">
+                                                    <div className="font-bold text-gray-800 text-base cursor-pointer flex items-center gap-2" onClick={() => toggleExpand(dealGroup.id)}>
+                                                        {dealGroup.name}
+                                                        <span className="text-gray-400 bg-gray-100 rounded px-1.5 py-0.5 text-xs">{expandedGroups.includes(dealGroup.id) ? 'ย่อ ▲' : 'ขยาย ▼'}</span>
+                                                    </div>
+                                                    {dealGroup.brand && <div className="text-xs font-semibold text-gray-500 uppercase tracking-widest mt-1">ยี่ห้อ: {dealGroup.brand}</div>}
+
+                                                    {editingDescId === dealGroup.id ? (
+                                                        <div className="mt-2 flex flex-col gap-1">
+                                                            <textarea
+                                                                value={newDesc}
+                                                                onChange={(e) => setNewDesc(e.target.value)}
+                                                                placeholder="ใส่รายละเอียดสินค้า..."
+                                                                className="w-full text-xs p-2 border border-blue-300 rounded focus:border-blue-500"
+                                                                rows="2"
+                                                            />
+                                                            <div className="flex gap-2">
+                                                                <button onClick={() => handleSaveDesc(dealGroup)} className="bg-blue-500 text-white text-[10px] px-2 py-1 rounded">บันทึก</button>
+                                                                <button onClick={() => setEditingDescId(null)} className="bg-gray-200 text-gray-700 text-[10px] px-2 py-1 rounded">ยกเลิก</button>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="mt-2 text-xs text-gray-600 border-l-2 border-orange-200 pl-2 cursor-pointer hover:bg-orange-50 p-1 rounded" onClick={() => startEditingDesc(dealGroup)}>
+                                                            {dealGroup.description ? <span className="line-clamp-2">{dealGroup.description} ✎</span> : <span className="text-orange-400 font-medium italic">+ เพิ่มรายละเอียดสินค้า ✎</span>}
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className="p-4 text-right">
+                                                    <div className="text-sm font-bold text-orange-600">
+                                                        {dealGroup.lowestPpu === dealGroup.highestPpu
+                                                            ? `฿${dealGroup.lowestPpu?.toFixed(2)}`
+                                                            : `฿${dealGroup.lowestPpu?.toFixed(2)} - ฿${dealGroup.highestPpu?.toFixed(2)}`}
+                                                    </div>
+                                                    <div className="text-[10px] text-gray-500 mt-1">
+                                                        ต่อ {dealGroup.unitType}
+                                                    </div>
+                                                </td>
+                                                <td className="p-4">
+                                                    <div className="text-xs text-gray-600 font-bold bg-gray-100 px-2 py-1 rounded inline-block mt-1">
+                                                        {dealGroup.postsCount} โพสต์/ร้าน
+                                                    </div>
+                                                </td>
+                                                <td className="p-4">
+                                                    <span className="bg-blue-50 text-blue-600 px-2 py-1 rounded text-xs font-bold mr-2 border border-blue-100">{dealGroup.category || 'General'}</span>
+                                                </td>
+                                                {adminTab === 'dashboard' && (
+                                                    <td className="p-4">
+                                                        {editingId === dealGroup.id ? (
+                                                            <div className="flex flex-col gap-2">
+                                                                <input
+                                                                    type="text"
+                                                                    value={newImageUrl}
+                                                                    onChange={(e) => setNewImageUrl(e.target.value)}
+                                                                    placeholder="วางลิงก์รูปภาพ..."
+                                                                    className="w-full text-xs p-2 border border-gray-300 rounded focus:border-orange-500 focus:outline-none"
+                                                                    autoFocus
+                                                                />
+                                                                <div className="flex gap-2">
+                                                                    <button onClick={() => handleSaveImage(dealGroup)} className="flex-1 bg-green-500 text-white text-xs font-bold py-1.5 rounded hover:bg-green-600 flex justify-center items-center gap-1 shadow-sm"><Save size={12} /> บันทึก</button>
+                                                                    <button onClick={() => setEditingId(null)} className="flex-1 bg-gray-200 text-gray-700 text-xs font-bold py-1.5 rounded hover:bg-gray-300 flex justify-center items-center gap-1 shadow-sm"><X size={12} /> ยกเลิก</button>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex flex-col gap-2">
+                                                                <button
+                                                                    onClick={() => startEditing(dealGroup)}
+                                                                    className="w-full bg-white border border-gray-300 text-gray-700 text-xs font-bold py-2 rounded shadow-sm hover:bg-gray-50 flex items-center justify-center gap-2 transition-colors"
+                                                                >
+                                                                    <Edit2 size={14} /> แก้ไขรูปภาพรวม
+                                                                </button>
+                                                                {dealGroup.masterImage && (
+                                                                    <button
+                                                                        onClick={() => handleDeleteImage(dealGroup)}
+                                                                        className="w-full text-red-500 text-xs font-bold py-1 hover:underline transition-colors mt-1"
+                                                                    >
+                                                                        ลบรูปภาพ
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                )}
+                                            </tr>
+                                            {/* EXPANDED SUB-TABLE FOR INDIVIDUAL POSTS */}
+                                            {expandedGroups.includes(dealGroup.id) && (
+                                                <tr className="bg-gray-50/50 border-b-2 border-gray-200">
+                                                    <td colSpan="6" className="p-4 pt-0">
+                                                        <div className="bg-white rounded-lg border border-gray-200 shadow-inner ml-20 p-3 overflow-x-auto">
+                                                            <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">โพสต์แยกรายร้านค้า ({dealGroup.originalItems.length} รายการ)</h4>
+                                                            <table className="w-full text-xs">
+                                                                <thead className="text-gray-400 border-b border-gray-100 pb-1">
+                                                                    <tr>
+                                                                        <th className="font-medium pb-2 text-left w-12">รูปภาพ</th>
+                                                                        <th className="font-medium pb-2 text-left">ร้านค้า/ผู้ใช้</th>
+                                                                        <th className="font-medium pb-2 text-right">ราคาคุ้มสุด (PPU)</th>
+                                                                        <th className="font-medium pb-2 text-center">อัปเดตเมื่อ</th>
+                                                                        <th className="font-medium pb-2 text-right">การจัดการ</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody className="divide-y divide-gray-50">
+                                                                    {dealGroup.originalItems.map(item => (
+                                                                        <tr key={item.id} className="hover:bg-gray-50">
+                                                                            <td className="py-2">
+                                                                                {item.image ? (
+                                                                                    <img src={item.image} alt={item.shop} className="w-8 h-8 rounded object-cover" />
+                                                                                ) : (
+                                                                                    <div className="w-8 h-8 bg-gray-100 rounded flex items-center justify-center text-gray-300"><ImageIcon size={12} /></div>
+                                                                                )}
+                                                                            </td>
+                                                                            <td className="py-2">
+                                                                                <div className="font-bold text-gray-700">{item.store || 'ไม่พบร้าน'}</div>
+                                                                                <div className="text-[10px] text-gray-400">โพสต์โดย: Get_Hunter</div>
+                                                                            </td>
+                                                                            <td className="py-2 text-right">
+                                                                                <div className="font-bold text-orange-600 text-sm">฿{item.ppu?.toFixed(2)}</div>
+                                                                                <div className="text-[9px] text-gray-400">จาก ฿{item.price} ({item.unitQuantity} {item.unitType})</div>
+                                                                            </td>
+                                                                            <td className="py-2 text-center text-[10px] text-gray-500">{new Date(item.lastUpdated).toLocaleString('th-TH')}</td>
+                                                                            <td className="py-2 text-right">
+                                                                                <button className="text-[10px] text-red-500 hover:underline">ลบโพสต์นี้</button>
+                                                                            </td>
+                                                                        </tr>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </React.Fragment>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {/* Merge Action Floating Button */}
+                        {adminTab === 'merge' && selectedForMerge.length >= 2 && (
+                            <div className="fixed bottom-10 inset-x-0 flex justify-center z-20 animate-fade-in pointer-events-none">
+                                <button
+                                    onClick={() => setShowMergeModal(true)}
+                                    className="bg-orange-600 hover:bg-orange-700 text-white px-8 py-4 rounded-full shadow-2xl font-bold text-lg flex items-center gap-3 transition-transform hover:scale-105 pointer-events-auto"
+                                >
+                                    <CheckSquare size={24} /> รวมข้อมูล {selectedForMerge.length} รายการที่เลือก
+                                </button>
+                            </div>
+                        )}
+
+                        {/* MERGE MODAL PROMPT */}
+                        {showMergeModal && (
+                            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                                <div className="bg-white rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+                                    <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-slate-50">
+                                        <h2 className="text-xl font-bold flex items-center gap-2"><RefreshCw className="text-orange-500" /> ยืนยันการรวมข้อมูล ({selectedForMerge.length} กลุ่ม)</h2>
+                                        <button onClick={() => setShowMergeModal(false)} className="text-gray-400 hover:text-gray-600"><X size={24} /></button>
+                                    </div>
+
+                                    <div className="p-6 overflow-y-auto flex-1 space-y-6">
+                                        {/* Name Selection */}
+                                        <div className="space-y-2">
+                                            <label className="font-bold text-gray-700 text-sm">ชื่อสินค้าที่ถูกต้อง (Final Name)</label>
+                                            <p className="text-xs text-gray-500 mb-2">เมื่อกดยืนยัน ข้อมูลที่เลือกทั้งหมดจะถูกเปลี่ยนเป็นชื่อนี้</p>
+                                            <div className="flex flex-col gap-2">
+                                                <input
+                                                    type="text"
+                                                    value={mergeFinalName}
+                                                    onChange={(e) => setMergeFinalName(e.target.value)}
+                                                    className="w-full p-3 border-2 border-orange-200 rounded-lg font-bold text-lg focus:border-orange-500 focus:outline-none"
+                                                />
+                                                <div className="flex flex-wrap gap-2 mt-2">
+                                                    {deals.filter(d => selectedForMerge.includes(d.id)).map(d => (
+                                                        <button
+                                                            key={d.id}
+                                                            onClick={() => setMergeFinalName(d.name)}
+                                                            className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-full transition-colors"
+                                                        >
+                                                            {d.name}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Image Selection */}
+                                        <div className="space-y-2">
+                                            <label className="font-bold text-gray-700 text-sm">เลือกรูปภาพหลัก (Master Thumbnail)</label>
+                                            <p className="text-xs text-gray-500 mb-2">แตะเลือกรูปภาพที่ดีที่สุด 1 รูป (หรือไม่เลือกก็ได้)</p>
+                                            <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
+                                                {/* Button to remove image / select none */}
+                                                <button
+                                                    onClick={() => setMergeFinalImage('')}
+                                                    className={`aspect-square rounded-xl border-2 flex flex-col items-center justify-center text-xs gap-1 transition-all ${mergeFinalImage === '' ? 'border-orange-500 bg-orange-50 text-orange-600 font-bold' : 'border-dashed border-gray-300 text-gray-400 hover:bg-gray-50'}`}
+                                                >
+                                                    <X size={20} /> ไม่ระบุรูป
+                                                </button>
+
+                                                {/* ALL IMAGES available from selected groups */}
+                                                {function () {
+                                                    const selectedGroups = deals.filter(d => selectedForMerge.includes(d.id));
+                                                    let allImages = [];
+                                                    selectedGroups.forEach(g => {
+                                                        if (g.masterImage && !allImages.includes(g.masterImage)) allImages.push(g.masterImage);
+                                                        g.originalItems.forEach(item => {
+                                                            if (item.image && !allImages.includes(item.image)) allImages.push(item.image);
+                                                        });
+                                                    });
+                                                    return allImages.map((img, idx) => (
+                                                        <div
+                                                            key={idx}
+                                                            onClick={() => setMergeFinalImage(img)}
+                                                            className={`aspect-square rounded-xl overflow-hidden border-4 cursor-pointer relative group transition-all ${mergeFinalImage === img ? 'border-orange-500 shadow-md transform scale-105 z-10' : 'border-transparent hover:border-orange-200'}`}
+                                                        >
+                                                            {mergeFinalImage === img && <div className="absolute top-1 right-1 bg-orange-500 text-white rounded-full p-0.5"><CheckSquare size={14} /></div>}
+                                                            <img src={img} className="w-full h-full object-cover" />
+                                                        </div>
+                                                    ));
+                                                }()}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="p-4 bg-slate-50 border-t border-gray-100 flex justify-end gap-3">
+                                        <button onClick={() => setShowMergeModal(false)} className="px-6 py-2.5 rounded-lg text-gray-600 font-bold hover:bg-gray-200 transition-colors">ยกเลิก</button>
+                                        <button onClick={handleMergeConfirm} className="px-6 py-2.5 rounded-lg bg-orange-600 text-white font-bold shadow-md hover:bg-orange-700 transition-colors flex items-center gap-2">
+                                            <Save size={18} /> ยืนยันการรวมข้อมูล
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                    </main>
+                </div>
+            );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<AdminApp />);
+    </script>
+</body>
+
+</html>
