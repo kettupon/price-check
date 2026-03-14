@@ -6,6 +6,40 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Price Admin Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        green: {
+                            50: '#f0f9eb',
+                            100: '#dbf2ce',
+                            200: '#bae6a1',
+                            300: '#92d571',
+                            400: '#6dc147',
+                            500: '#48A111',
+                            600: '#387e0d',
+                            700: '#2c610b',
+                            800: '#214709',
+                            900: '#183107',
+                        },
+                        orange: {
+                            50: '#fffcf1',
+                            100: '#fff6db',
+                            200: '#ffebb5',
+                            300: '#ffdc89',
+                            400: '#ffbd45',
+                            500: '#FF8C00',
+                            600: '#e67300',
+                            700: '#bf5700',
+                            800: '#994000',
+                            900: '#7d3300',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700;800&display=swap');
 
@@ -34,9 +68,9 @@
     <script type="text/babel" data-type="module">
         import React, { useState, useEffect } from 'react';
         import { createRoot } from 'react-dom/client';
-        import { LayoutDashboard, Edit2, Image as ImageIcon, Save, X, Search, AlertCircle, RefreshCw, CheckSquare } from 'lucide-react';
+        import { LayoutDashboard, Edit2, Image as ImageIcon, Save, X, Search, AlertCircle, RefreshCw, CheckSquare, Bell, Store, ArrowRight, Check, XCircle, Tag, Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
         import { initializeApp } from 'firebase/app';
-        import { getFirestore, collection, onSnapshot, query, orderBy, doc, updateDoc } from 'firebase/firestore';
+        import { getFirestore, collection, onSnapshot, query, orderBy, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 
         const firebaseConfig = {
             apiKey: "AIzaSyByDvi-wyekFdKMiMv_Cb2yUq9yF0Tw3Uc",
@@ -58,9 +92,30 @@
             const [newDesc, setNewDesc] = useState('');
             const [expandedGroups, setExpandedGroups] = useState([]); // array of group IDs
 
-            const [adminTab, setAdminTab] = useState('dashboard'); // 'dashboard' | 'merge'
+            const [adminTab, setAdminTab] = useState('dashboard'); // 'dashboard' | 'merge' | 'manage' | 'notifications'
             const [selectedForMerge, setSelectedForMerge] = useState([]);
             const [showMergeModal, setShowMergeModal] = useState(false);
+            const [isDeleteMode, setIsDeleteMode] = useState(false);
+
+            // Raw items (ungrouped) for notifications tab
+            const [rawItems, setRawItems] = useState([]);
+
+            // Soft delete and bin state
+            const [deletedItems, setDeletedItems] = useState([]);
+            const [deleteModalTarget, setDeleteModalTarget] = useState(null); // { type: 'post' | 'group', id?: string, group?: object }
+
+            // Notification tab editing state
+            const [editingStoreItemId, setEditingStoreItemId] = useState(null);
+            const [editStoreValue, setEditStoreValue] = useState('');
+            const [storeSearchQuery, setStoreSearchQuery] = useState('');
+            const [moveItemId, setMoveItemId] = useState(null);
+            const [moveTargetName, setMoveTargetName] = useState('');
+            const [adminTagItemId, setAdminTagItemId] = useState(null);
+            const [adminTagValue, setAdminTagValue] = useState('');
+
+            // For editing product name inline in Manage tab
+            const [editingNameId, setEditingNameId] = useState(null);
+            const [newName, setNewName] = useState('');
 
             const toggleExpand = (groupId) => {
                 setExpandedGroups(prev =>
@@ -78,7 +133,17 @@
 
                     // Group by name
                     const grouped = {};
+                    const binned = [];
+                    const activeRawItems = [];
+
                     fbDeals.forEach(deal => {
+                        if (deal.deleted === true) {
+                            binned.push(deal);
+                            return; // skip grouping for bin items
+                        }
+
+                        activeRawItems.push(deal);
+
                         const name = deal.name || 'Unknown';
 
                         // Calculate PPU
@@ -123,6 +188,8 @@
                     });
 
                     setDeals(Object.values(grouped));
+                    setRawItems(activeRawItems); // Store raw items for notifications
+                    setDeletedItems(binned); // Store binned items
                 });
                 return () => unsubscribe();
             }, []);
@@ -164,6 +231,55 @@
                 }
             };
 
+            const handleDeletePost = (id, itemName) => {
+                setDeleteModalTarget({ type: 'post', id, itemName });
+            };
+
+            const handleDeleteGroup = (dealGroup) => {
+                setDeleteModalTarget({ type: 'group', group: dealGroup, itemName: dealGroup.name });
+            };
+
+            const confirmDelete = async () => {
+                if (!deleteModalTarget) return;
+
+                try {
+                    if (deleteModalTarget.type === 'post') {
+                        const itemRef = doc(db, "items", deleteModalTarget.id);
+                        await updateDoc(itemRef, { deleted: true });
+                    } else if (deleteModalTarget.type === 'group') {
+                        const updatePromises = deleteModalTarget.group.originalItems.map(item => {
+                            const itemRef = doc(db, "items", item.id);
+                            return updateDoc(itemRef, { deleted: true });
+                        });
+                        await Promise.all(updatePromises);
+                    }
+                    setDeleteModalTarget(null);
+                } catch (error) {
+                    console.error("Error deleting: ", error);
+                    alert("เกิดข้อผิดพลาดในการลบข้อมูล");
+                }
+            };
+
+            const handleRecoverPost = async (id) => {
+                try {
+                    const itemRef = doc(db, "items", id);
+                    await updateDoc(itemRef, { deleted: false });
+                } catch (error) {
+                    console.error("Error recovering item: ", error);
+                    alert("เกิดข้อผิดพลาดในการกู้คืน");
+                }
+            };
+
+            const handlePermanentDeletePost = async (id) => {
+                if (!confirm('ยืนยันที่จะลบข้อมูลนี้ถาวร? (ไม่สามารถกู้คืนได้)')) return;
+                try {
+                    await deleteDoc(doc(db, "items", id));
+                } catch (error) {
+                    console.error("Error permanently deleting: ", error);
+                    alert("เกิดข้อผิดพลาดในการลบแบบถาวร");
+                }
+            };
+
             const startEditing = (dealGroup) => {
                 setEditingId(dealGroup.id);
                 setNewImageUrl(dealGroup.masterImage || '');
@@ -191,11 +307,118 @@
                 setNewDesc(dealGroup.description || '');
             };
 
+            const handleSaveName = async (dealGroup) => {
+                if (!newName.trim()) {
+                    alert('ชื่อสินค้าไม่สามารถเว้นว่างได้');
+                    return;
+                }
+                if (!confirm(`ยืนยันการเปลี่ยนชื่อสินค้าจาก "${dealGroup.name}" เป็น "${newName}" ? \n(ข้อมูลทั้งหมดในกลุ่มนี้จะถูกเปลี่ยนชื่อ)`)) return;
+
+                try {
+                    const updatePromises = dealGroup.originalItems.map(item => {
+                        const itemRef = doc(db, "items", item.id);
+                        return updateDoc(itemRef, {
+                            name: newName
+                        });
+                    });
+                    await Promise.all(updatePromises);
+                    setEditingNameId(null);
+                    setNewName('');
+                } catch (error) {
+                    console.error("Error updating name: ", error);
+                    alert("Failed to update name.");
+                }
+            };
+
+            const startEditingName = (dealGroup) => {
+                setEditingNameId(dealGroup.id);
+                setNewName(dealGroup.name || '');
+            };
+
             const filteredDeals = deals.filter(deal =>
                 (deal.name && deal.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
                 (deal.brand && deal.brand.toLowerCase().includes(searchQuery.toLowerCase())) ||
                 (deal.store && deal.store.toLowerCase().includes(searchQuery.toLowerCase()))
             );
+
+            // Unique product names for move-to dropdown
+            const uniqueProductNames = [...new Set(deals.map(d => d.name))].sort();
+
+            // All unique store names from system for searchable dropdown
+            const allStoreNames = [...new Set(rawItems.map(i => i.store).filter(Boolean))].sort();
+
+            // Items pending review (not yet approved)
+            const pendingItems = rawItems.filter(i => i.adminStatus !== 'approved');
+
+            // Save edited store name for a single item
+            const handleSaveStore = async (itemId) => {
+                try {
+                    const itemRef = doc(db, "items", itemId);
+                    await updateDoc(itemRef, { store: editStoreValue });
+                    setEditingStoreItemId(null);
+                    setEditStoreValue('');
+                    setStoreSearchQuery('');
+                } catch (error) {
+                    console.error("Error updating store: ", error);
+                    alert("Failed to update store.");
+                }
+            };
+
+            // Add admin tag to an item
+            const handleAddAdminTag = async (itemId, existingTags) => {
+                const val = adminTagValue.trim().replace(',', '').toLowerCase();
+                if (!val) return;
+                const updatedTags = [...(existingTags || []), val].filter((t, i, a) => a.indexOf(t) === i);
+                try {
+                    const itemRef = doc(db, "items", itemId);
+                    await updateDoc(itemRef, { tags: updatedTags });
+                    setAdminTagItemId(null);
+                    setAdminTagValue('');
+                } catch (error) {
+                    console.error("Error adding tag: ", error);
+                    alert("Failed to add tag.");
+                }
+            };
+
+            // Remove a tag from an item
+            const handleRemoveTag = async (itemId, existingTags, tagToRemove) => {
+                const updatedTags = (existingTags || []).filter(t => t !== tagToRemove);
+                try {
+                    const itemRef = doc(db, "items", itemId);
+                    await updateDoc(itemRef, { tags: updatedTags });
+                } catch (error) {
+                    console.error("Error removing tag: ", error);
+                }
+            };
+
+            // Move a single item to a different product group
+            const handleMoveItem = async (itemId) => {
+                if (!moveTargetName) {
+                    alert('กรุณาเลือกสินค้าปลายทาง');
+                    return;
+                }
+                if (!confirm(`ย้ายรายการนี้ไปกลุ่ม "${moveTargetName}" ?`)) return;
+                try {
+                    const itemRef = doc(db, "items", itemId);
+                    await updateDoc(itemRef, { name: moveTargetName });
+                    setMoveItemId(null);
+                    setMoveTargetName('');
+                } catch (error) {
+                    console.error("Error moving item: ", error);
+                    alert("Failed to move item.");
+                }
+            };
+
+            // Approve / Disapprove an item
+            const handleSetAdminStatus = async (itemId, status) => {
+                try {
+                    const itemRef = doc(db, "items", itemId);
+                    await updateDoc(itemRef, { adminStatus: status });
+                } catch (error) {
+                    console.error("Error updating admin status: ", error);
+                    alert("Failed to update status.");
+                }
+            };
 
             const toggleMergeSelection = (groupId) => {
                 setSelectedForMerge(prev =>
@@ -276,203 +499,653 @@
                     </header>
 
                     {/* Navigation Tabs */}
-                    <div className="bg-white border-b border-gray-200 px-8 flex gap-6">
+                    <div className="bg-white border-b border-gray-200 px-8 flex gap-6 overflow-x-auto">
                         <button
                             onClick={() => { setAdminTab('dashboard'); setSelectedForMerge([]); }}
-                            className={`py-4 font-bold text-sm border-b-2 flex items-center gap-2 transition-colors ${adminTab === 'dashboard' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+                            className={`py-4 font-bold text-sm border-b-2 flex items-center gap-2 transition-colors whitespace-nowrap ${adminTab === 'dashboard' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
                         >
                             <LayoutDashboard size={18} /> ภาพรวม (Dashboard)
                         </button>
                         <button
-                            onClick={() => setAdminTab('merge')}
-                            className={`py-4 font-bold text-sm border-b-2 flex items-center gap-2 transition-colors ${adminTab === 'merge' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+                            onClick={() => { setAdminTab('manage'); setSelectedForMerge([]); }}
+                            className={`py-4 font-bold text-sm border-b-2 flex items-center gap-2 transition-colors whitespace-nowrap ${adminTab === 'manage' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
                         >
-                            <RefreshCw size={18} /> จัดการข้อมูลซ้ำซ้อน (Merge)
+                            <Edit2 size={18} /> จัดการข้อมูล (Manage Data)
+                        </button>
+                        <button
+                            onClick={() => setAdminTab('merge')}
+                            className={`py-4 font-bold text-sm border-b-2 flex items-center gap-2 transition-colors whitespace-nowrap ${adminTab === 'merge' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+                        >
+                            <RefreshCw size={18} /> รวมข้อมูลซ้ำซ้อน (Merge)
                             {selectedForMerge.length > 0 && <span className="bg-orange-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{selectedForMerge.length}</span>}
+                        </button>
+                        <button
+                            onClick={() => { setAdminTab('notifications'); setSelectedForMerge([]); setIsDeleteMode(false); }}
+                            className={`py-4 font-bold text-sm border-b-2 flex items-center gap-2 transition-colors whitespace-nowrap ${adminTab === 'notifications' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+                        >
+                            <Bell size={18} /> แจ้งเตือน
+                            {pendingItems.length > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 animate-pulse">{pendingItems.length}</span>}
+                        </button>
+                        <button
+                            onClick={() => { setAdminTab('bin'); setSelectedForMerge([]); setIsDeleteMode(false); setExpandedGroups([]); }}
+                            className={`py-4 font-bold text-sm border-b-2 flex items-center gap-2 transition-colors whitespace-nowrap ${adminTab === 'bin' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+                        >
+                            <Trash2 size={18} /> ถังขยะ
+                            {deletedItems.length > 0 && <span className="bg-gray-100 text-gray-500 text-[10px] px-1.5 py-0.5 rounded-full">{deletedItems.length}</span>}
                         </button>
                     </div>
 
+                    {/* Manage Tab Actions Bar (Delete Mode) */}
+                    {adminTab === 'manage' && (
+                        <div className="bg-slate-50 border-b border-gray-200 px-8 py-3 flex justify-end items-center shadow-sm z-10 relative">
+                            <button
+                                onClick={() => setIsDeleteMode(!isDeleteMode)}
+                                className={`flex items-center gap-2 px-3 py-1.5 rounded-full font-bold text-sm transition-colors ${isDeleteMode ? 'bg-red-100 text-red-600 border border-red-200 shadow-inner' : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'}`}
+                            >
+                                {isDeleteMode ? <ToggleRight size={18} /> : <ToggleLeft size={18} />} Delete mode : {isDeleteMode ? 'ON' : 'OFF'}
+                            </button>
+                        </div>
+                    )}
+
                     {/* Content */}
                     <main className="flex-1 p-8 overflow-y-auto relative">
-                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                            <table className="w-full text-left text-sm">
-                                <thead className="bg-slate-50 text-slate-600 font-bold border-b border-gray-200">
-                                    <tr>
-                                        {adminTab === 'merge' && <th className="p-4 w-12 text-center">เลือก</th>}
-                                        <th className="p-4 w-20">รูปภาพกลุ่มสินคัา</th>
-                                        <th className="p-4">รายละเอียดสินค้า</th>
-                                        <th className="p-4 w-32 text-right">ช่วงราคา (฿)</th>
-                                        <th className="p-4 w-48">จำนวนโพสต์บอกต่อ</th>
-                                        <th className="p-4 w-40">หมวดหมู่</th>
-                                        {adminTab === 'dashboard' && <th className="p-4 w-48">จัดการรูปรวม</th>}
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100">
-                                    {filteredDeals.length === 0 ? (
+                        {adminTab !== 'notifications' && adminTab !== 'bin' && (
+                            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                                <table className="w-full text-left text-sm">
+                                    <thead className="bg-slate-50 text-slate-600 font-bold border-b border-gray-200">
                                         <tr>
-                                            <td colSpan={adminTab === 'merge' ? "7" : "6"} className="p-10 text-center text-gray-400">
-                                                <AlertCircle size={32} className="mx-auto mb-2 text-gray-300" />
-                                                ไม่มีข้อมูลสินค้า
-                                            </td>
+                                            {adminTab === 'merge' && <th className="p-4 w-12 text-center">เลือก</th>}
+                                            <th className="p-4 w-20">รูปภาพกลุ่มสินคัา</th>
+                                            <th className="p-4">รายละเอียดสินค้า</th>
+                                            {adminTab !== 'manage' && <th className="p-4 w-32 text-right">ช่วงราคา (฿)</th>}
+                                            {adminTab !== 'manage' && <th className="p-4 w-48">จำนวนโพสต์บอกต่อ</th>}
+                                            {adminTab === 'manage' && <th className="p-4 w-48">จัดการรูปรวม</th>}
+                                            {adminTab === 'manage' && isDeleteMode && <th className="p-4 w-20 text-center text-red-500"><Trash2 size={16} className="mx-auto" /></th>}
                                         </tr>
-                                    ) : filteredDeals.map(dealGroup => (
-                                        <React.Fragment key={dealGroup.id}>
-                                            <tr className={`hover:bg-slate-50 transition-colors border-b border-gray-100 ${selectedForMerge.includes(dealGroup.id) ? 'bg-orange-50/30' : ''}`}>
-                                                {adminTab === 'merge' && (
-                                                    <td className="p-4 text-center">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={selectedForMerge.includes(dealGroup.id)}
-                                                            onChange={() => toggleMergeSelection(dealGroup.id)}
-                                                            className="w-5 h-5 rounded border-gray-300 text-orange-500 focus:ring-orange-500 cursor-pointer"
-                                                        />
-                                                    </td>
-                                                )}
-                                                <td className="p-4 text-center">
-                                                    {dealGroup.masterImage ? (
-                                                        <img src={dealGroup.masterImage} alt={dealGroup.name} className="w-16 h-16 object-cover rounded shadow-sm mx-auto cursor-pointer" onClick={() => toggleExpand(dealGroup.id)} />
-                                                    ) : (
-                                                        <div onClick={() => toggleExpand(dealGroup.id)} className="w-16 h-16 bg-gray-100 rounded flex items-center justify-center text-gray-300 mx-auto border border-gray-200 cursor-pointer">
-                                                            <ImageIcon size={24} />
-                                                        </div>
-                                                    )}
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                        {filteredDeals.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={adminTab === 'merge' ? "7" : (adminTab === 'manage' ? "4" : "6")} className="p-10 text-center text-gray-400">
+                                                    <AlertCircle size={32} className="mx-auto mb-2 text-gray-300" />
+                                                    ไม่มีข้อมูลสินค้า
                                                 </td>
-                                                <td className="p-4">
-                                                    <div className="font-bold text-gray-800 text-base cursor-pointer flex items-center gap-2" onClick={() => toggleExpand(dealGroup.id)}>
-                                                        {dealGroup.name}
-                                                        <span className="text-gray-400 bg-gray-100 rounded px-1.5 py-0.5 text-xs">{expandedGroups.includes(dealGroup.id) ? 'ย่อ ▲' : 'ขยาย ▼'}</span>
-                                                    </div>
-                                                    {dealGroup.brand && <div className="text-xs font-semibold text-gray-500 uppercase tracking-widest mt-1">ยี่ห้อ: {dealGroup.brand}</div>}
-
-                                                    {editingDescId === dealGroup.id ? (
-                                                        <div className="mt-2 flex flex-col gap-1">
-                                                            <textarea
-                                                                value={newDesc}
-                                                                onChange={(e) => setNewDesc(e.target.value)}
-                                                                placeholder="ใส่รายละเอียดสินค้า..."
-                                                                className="w-full text-xs p-2 border border-blue-300 rounded focus:border-blue-500"
-                                                                rows="2"
+                                            </tr>
+                                        ) : filteredDeals.map(dealGroup => (
+                                            <React.Fragment key={dealGroup.id}>
+                                                <tr className={`hover:bg-slate-50 transition-colors border-b border-gray-100 ${selectedForMerge.includes(dealGroup.id) ? 'bg-orange-50/30' : ''}`}>
+                                                    {adminTab === 'merge' && (
+                                                        <td className="p-4 text-center">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={selectedForMerge.includes(dealGroup.id)}
+                                                                onChange={() => toggleMergeSelection(dealGroup.id)}
+                                                                className="w-5 h-5 rounded border-gray-300 text-orange-500 focus:ring-orange-500 cursor-pointer"
                                                             />
-                                                            <div className="flex gap-2">
-                                                                <button onClick={() => handleSaveDesc(dealGroup)} className="bg-blue-500 text-white text-[10px] px-2 py-1 rounded">บันทึก</button>
-                                                                <button onClick={() => setEditingDescId(null)} className="bg-gray-200 text-gray-700 text-[10px] px-2 py-1 rounded">ยกเลิก</button>
-                                                            </div>
-                                                        </div>
-                                                    ) : (
-                                                        <div className="mt-2 text-xs text-gray-600 border-l-2 border-orange-200 pl-2 cursor-pointer hover:bg-orange-50 p-1 rounded" onClick={() => startEditingDesc(dealGroup)}>
-                                                            {dealGroup.description ? <span className="line-clamp-2">{dealGroup.description} ✎</span> : <span className="text-orange-400 font-medium italic">+ เพิ่มรายละเอียดสินค้า ✎</span>}
-                                                        </div>
+                                                        </td>
                                                     )}
-                                                </td>
-                                                <td className="p-4 text-right">
-                                                    <div className="text-sm font-bold text-orange-600">
-                                                        {dealGroup.lowestPpu === dealGroup.highestPpu
-                                                            ? `฿${dealGroup.lowestPpu?.toFixed(2)}`
-                                                            : `฿${dealGroup.lowestPpu?.toFixed(2)} - ฿${dealGroup.highestPpu?.toFixed(2)}`}
-                                                    </div>
-                                                    <div className="text-[10px] text-gray-500 mt-1">
-                                                        ต่อ {dealGroup.unitType}
-                                                    </div>
-                                                </td>
-                                                <td className="p-4">
-                                                    <div className="text-xs text-gray-600 font-bold bg-gray-100 px-2 py-1 rounded inline-block mt-1">
-                                                        {dealGroup.postsCount} โพสต์/ร้าน
-                                                    </div>
-                                                </td>
-                                                <td className="p-4">
-                                                    <span className="bg-blue-50 text-blue-600 px-2 py-1 rounded text-xs font-bold mr-2 border border-blue-100">{dealGroup.category || 'General'}</span>
-                                                </td>
-                                                {adminTab === 'dashboard' && (
-                                                    <td className="p-4">
-                                                        {editingId === dealGroup.id ? (
-                                                            <div className="flex flex-col gap-2">
-                                                                <input
-                                                                    type="text"
-                                                                    value={newImageUrl}
-                                                                    onChange={(e) => setNewImageUrl(e.target.value)}
-                                                                    placeholder="วางลิงก์รูปภาพ..."
-                                                                    className="w-full text-xs p-2 border border-gray-300 rounded focus:border-orange-500 focus:outline-none"
-                                                                    autoFocus
-                                                                />
-                                                                <div className="flex gap-2">
-                                                                    <button onClick={() => handleSaveImage(dealGroup)} className="flex-1 bg-green-500 text-white text-xs font-bold py-1.5 rounded hover:bg-green-600 flex justify-center items-center gap-1 shadow-sm"><Save size={12} /> บันทึก</button>
-                                                                    <button onClick={() => setEditingId(null)} className="flex-1 bg-gray-200 text-gray-700 text-xs font-bold py-1.5 rounded hover:bg-gray-300 flex justify-center items-center gap-1 shadow-sm"><X size={12} /> ยกเลิก</button>
-                                                                </div>
-                                                            </div>
+                                                    <td className="p-4 text-center">
+                                                        {dealGroup.masterImage ? (
+                                                            <img src={dealGroup.masterImage} alt={dealGroup.name} className="w-16 h-16 object-cover rounded shadow-sm mx-auto cursor-pointer" onClick={() => toggleExpand(dealGroup.id)} />
                                                         ) : (
-                                                            <div className="flex flex-col gap-2">
-                                                                <button
-                                                                    onClick={() => startEditing(dealGroup)}
-                                                                    className="w-full bg-white border border-gray-300 text-gray-700 text-xs font-bold py-2 rounded shadow-sm hover:bg-gray-50 flex items-center justify-center gap-2 transition-colors"
-                                                                >
-                                                                    <Edit2 size={14} /> แก้ไขรูปภาพรวม
-                                                                </button>
-                                                                {dealGroup.masterImage && (
-                                                                    <button
-                                                                        onClick={() => handleDeleteImage(dealGroup)}
-                                                                        className="w-full text-red-500 text-xs font-bold py-1 hover:underline transition-colors mt-1"
-                                                                    >
-                                                                        ลบรูปภาพ
-                                                                    </button>
-                                                                )}
+                                                            <div onClick={() => toggleExpand(dealGroup.id)} className="w-16 h-16 bg-gray-100 rounded flex items-center justify-center text-gray-300 mx-auto border border-gray-200 cursor-pointer">
+                                                                <ImageIcon size={24} />
                                                             </div>
                                                         )}
                                                     </td>
-                                                )}
-                                            </tr>
-                                            {/* EXPANDED SUB-TABLE FOR INDIVIDUAL POSTS */}
-                                            {expandedGroups.includes(dealGroup.id) && (
-                                                <tr className="bg-gray-50/50 border-b-2 border-gray-200">
-                                                    <td colSpan="6" className="p-4 pt-0">
-                                                        <div className="bg-white rounded-lg border border-gray-200 shadow-inner ml-20 p-3 overflow-x-auto">
-                                                            <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">โพสต์แยกรายร้านค้า ({dealGroup.originalItems.length} รายการ)</h4>
-                                                            <table className="w-full text-xs">
-                                                                <thead className="text-gray-400 border-b border-gray-100 pb-1">
-                                                                    <tr>
-                                                                        <th className="font-medium pb-2 text-left w-12">รูปภาพ</th>
-                                                                        <th className="font-medium pb-2 text-left">ร้านค้า/ผู้ใช้</th>
-                                                                        <th className="font-medium pb-2 text-right">ราคาคุ้มสุด (PPU)</th>
-                                                                        <th className="font-medium pb-2 text-center">อัปเดตเมื่อ</th>
-                                                                        <th className="font-medium pb-2 text-right">การจัดการ</th>
-                                                                    </tr>
-                                                                </thead>
-                                                                <tbody className="divide-y divide-gray-50">
-                                                                    {dealGroup.originalItems.map(item => (
-                                                                        <tr key={item.id} className="hover:bg-gray-50">
-                                                                            <td className="py-2">
-                                                                                {item.image ? (
-                                                                                    <img src={item.image} alt={item.shop} className="w-8 h-8 rounded object-cover" />
-                                                                                ) : (
-                                                                                    <div className="w-8 h-8 bg-gray-100 rounded flex items-center justify-center text-gray-300"><ImageIcon size={12} /></div>
-                                                                                )}
-                                                                            </td>
-                                                                            <td className="py-2">
-                                                                                <div className="font-bold text-gray-700">{item.store || 'ไม่พบร้าน'}</div>
-                                                                                <div className="text-[10px] text-gray-400">โพสต์โดย: Get_Hunter</div>
-                                                                            </td>
-                                                                            <td className="py-2 text-right">
-                                                                                <div className="font-bold text-orange-600 text-sm">฿{item.ppu?.toFixed(2)}</div>
-                                                                                <div className="text-[9px] text-gray-400">จาก ฿{item.price} ({item.unitQuantity} {item.unitType})</div>
-                                                                            </td>
-                                                                            <td className="py-2 text-center text-[10px] text-gray-500">{new Date(item.lastUpdated).toLocaleString('th-TH')}</td>
-                                                                            <td className="py-2 text-right">
-                                                                                <button className="text-[10px] text-red-500 hover:underline">ลบโพสต์นี้</button>
-                                                                            </td>
-                                                                        </tr>
-                                                                    ))}
-                                                                </tbody>
-                                                            </table>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            )}
-                                        </React.Fragment>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                                                    <td className="p-4">
+                                                        {/* NAME EDITING */}
+                                                        {adminTab === 'manage' && editingNameId === dealGroup.id ? (
+                                                            <div className="flex flex-col gap-1 mb-2">
+                                                                <input
+                                                                    type="text"
+                                                                    value={newName}
+                                                                    onChange={(e) => setNewName(e.target.value)}
+                                                                    className="w-full text-base font-bold p-2 border border-orange-300 rounded focus:border-orange-500"
+                                                                    autoFocus
+                                                                />
+                                                                <div className="flex gap-2 mt-1">
+                                                                    <button onClick={() => handleSaveName(dealGroup)} className="bg-orange-500 text-white text-[10px] px-3 py-1.5 rounded font-bold">บันทึกชื่อ</button>
+                                                                    <button onClick={() => setEditingNameId(null)} className="bg-gray-200 text-gray-700 text-[10px] px-3 py-1.5 rounded font-bold">ยกเลิก</button>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <>
+                                                                <div className="font-bold text-gray-800 text-base cursor-pointer flex items-center gap-2 group" onClick={() => {
+                                                                    if (adminTab === 'manage') {
+                                                                        startEditingName(dealGroup);
+                                                                    } else {
+                                                                        toggleExpand(dealGroup.id);
+                                                                    }
+                                                                }}>
+                                                                    {dealGroup.name}
+                                                                    {adminTab === 'manage' ? (
+                                                                        <span className="opacity-0 group-hover:opacity-100 transition-opacity text-orange-500 text-[10px] font-normal px-2 py-0.5 bg-orange-50 rounded">✎ แก้ไขชื่อ</span>
+                                                                    ) : (
+                                                                        <span className="text-gray-400 bg-gray-100 rounded px-1.5 py-0.5 text-xs">{expandedGroups.includes(dealGroup.id) ? 'ย่อ ▲' : 'ขยาย ▼'}</span>
+                                                                    )}
+                                                                </div>
+                                                                {dealGroup.brand && <div className="text-xs font-semibold text-gray-500 uppercase tracking-widest mt-1">ยี่ห้อ: {dealGroup.brand}</div>}
+                                                            </>
+                                                        )}
 
-                        {/* Merge Action Floating Button */}
+                                                        {/* DESCRIPTION EDITING */}
+                                                        {adminTab === 'manage' ? (
+                                                            editingDescId === dealGroup.id ? (
+                                                                <div className="mt-3 flex flex-col gap-1">
+                                                                    <textarea
+                                                                        value={newDesc}
+                                                                        onChange={(e) => setNewDesc(e.target.value)}
+                                                                        placeholder="ใส่รายละเอียดสินค้า..."
+                                                                        className="w-full text-xs p-2 border border-blue-300 rounded focus:border-blue-500"
+                                                                        rows="2"
+                                                                    />
+                                                                    <div className="flex gap-2 mt-1">
+                                                                        <button onClick={() => handleSaveDesc(dealGroup)} className="bg-blue-500 text-white text-[10px] px-3 py-1.5 rounded font-bold">บันทึกเนื้อหา</button>
+                                                                        <button onClick={() => setEditingDescId(null)} className="bg-gray-200 text-gray-700 text-[10px] px-3 py-1.5 rounded font-bold">ยกเลิก</button>
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="mt-2 text-xs text-gray-600 border-l-2 border-orange-200 pl-2 cursor-pointer hover:bg-orange-50 p-1 rounded group transition-colors" onClick={() => startEditingDesc(dealGroup)}>
+                                                                    {dealGroup.description ?
+                                                                        <span className="line-clamp-2">{dealGroup.description} <span className="opacity-0 group-hover:opacity-100 transition-opacity text-orange-500 ml-1">✎</span></span>
+                                                                        :
+                                                                        <span className="text-orange-400 font-medium italic">+ เพิ่มรายละเอียดสินค้า ✎</span>
+                                                                    }
+                                                                </div>
+                                                            )
+                                                        ) : (
+                                                            /* Read-only description for non-manage tabs */
+                                                            dealGroup.description && (
+                                                                <div className="mt-2 text-xs text-gray-600 border-l-2 border-gray-200 pl-2 p-1 line-clamp-2">
+                                                                    {dealGroup.description}
+                                                                </div>
+                                                            )
+                                                        )}
+                                                    </td>
+                                                    {adminTab !== 'manage' && (
+                                                        <React.Fragment>
+                                                            <td className="p-4 text-right">
+                                                                <div className="text-sm font-bold text-orange-600">
+                                                                    {dealGroup.lowestPpu === dealGroup.highestPpu
+                                                                        ? `฿${dealGroup.lowestPpu?.toFixed(2)}`
+                                                                        : `฿${dealGroup.lowestPpu?.toFixed(2)} - ฿${dealGroup.highestPpu?.toFixed(2)}`}
+                                                                </div>
+                                                                <div className="text-[10px] text-gray-500 mt-1">
+                                                                    ต่อ {dealGroup.unitType}
+                                                                </div>
+                                                            </td>
+                                                            <td className="p-4">
+                                                                <div className="text-xs text-gray-600 font-bold bg-gray-100 px-2 py-1 rounded inline-block mt-1">
+                                                                    {dealGroup.postsCount} โพสต์/ร้าน
+                                                                </div>
+                                                            </td>
+                                                        </React.Fragment>
+                                                    )}
+                                                    {adminTab === 'manage' && (
+                                                        <td className="p-4">
+                                                            {editingId === dealGroup.id ? (
+                                                                <div className="flex flex-col gap-2">
+                                                                    <input
+                                                                        type="text"
+                                                                        value={newImageUrl}
+                                                                        onChange={(e) => setNewImageUrl(e.target.value)}
+                                                                        placeholder="วางลิงก์รูปภาพ..."
+                                                                        className="w-full text-xs p-2 border border-gray-300 rounded focus:border-orange-500 focus:outline-none"
+                                                                        autoFocus
+                                                                    />
+                                                                    <div className="flex gap-2">
+                                                                        <button onClick={() => handleSaveImage(dealGroup)} className="flex-1 bg-green-500 text-white text-xs font-bold py-1.5 rounded hover:bg-green-600 flex justify-center items-center gap-1 shadow-sm"><Save size={12} /> บันทึก</button>
+                                                                        <button onClick={() => setEditingId(null)} className="flex-1 bg-gray-200 text-gray-700 text-xs font-bold py-1.5 rounded hover:bg-gray-300 flex justify-center items-center gap-1 shadow-sm"><X size={12} /> ยกเลิก</button>
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="flex flex-col gap-2">
+                                                                    <button
+                                                                        onClick={() => startEditing(dealGroup)}
+                                                                        className="w-full bg-white border border-gray-300 text-gray-700 text-xs font-bold py-2 rounded shadow-sm hover:bg-gray-50 flex items-center justify-center gap-2 transition-colors"
+                                                                    >
+                                                                        <Edit2 size={14} /> แก้ไขรูปภาพรวม
+                                                                    </button>
+                                                                    {dealGroup.masterImage && isDeleteMode && (
+                                                                        <button
+                                                                            onClick={() => handleDeleteImage(dealGroup)}
+                                                                            className="w-full text-red-500 text-xs font-bold py-1 hover:underline transition-colors mt-1"
+                                                                        >
+                                                                            ลบรูปภาพ
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                    )}
+                                                    {adminTab === 'manage' && isDeleteMode && (
+                                                        <td className="p-4 text-center">
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); handleDeleteGroup(dealGroup); }}
+                                                                className="text-white bg-red-500 hover:bg-red-600 p-2 rounded-full shadow-sm transition-colors"
+                                                                title="ลบกลุ่มสินค้านี้"
+                                                            >
+                                                                <Trash2 size={16} />
+                                                            </button>
+                                                        </td>
+                                                    )}
+                                                </tr>
+                                                {/* EXPANDED SUB-TABLE FOR INDIVIDUAL POSTS */}
+                                                {expandedGroups.includes(dealGroup.id) && (
+                                                    <tr className="bg-gray-50/50 border-b-2 border-gray-200">
+                                                        <td colSpan="6" className="p-4 pt-0">
+                                                            <div className="bg-white rounded-lg border border-gray-200 shadow-inner ml-20 p-4">
+                                                                <h4 className="text-xs font-bold text-gray-500 uppercase mb-3 text-center border-b pb-2">โพสต์แยกรายร้านค้า ({dealGroup.originalItems.length} รายการ)</h4>
+                                                                <div className="space-y-3">
+                                                                    {dealGroup.originalItems.map(item => (
+                                                                        <div key={item.id} className="border border-gray-200 rounded-lg p-3 bg-white flex gap-3 shadow-sm hover:border-orange-200 transition-colors">
+                                                                            {/* Image Preview - Clickable */}
+                                                                            <a href={item.image} target="_blank" rel="noopener noreferrer" className="w-16 h-16 rounded-lg bg-gray-100 flex-shrink-0 overflow-hidden border border-gray-200 cursor-pointer hover:opacity-80 transition-opacity block">
+                                                                                {item.image ? <img src={item.image} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-300"><ImageIcon size={20} /></div>}
+                                                                            </a>
+
+                                                                            {/* Info */}
+                                                                            <div className="flex-1 min-w-0">
+                                                                                <div className="flex items-start justify-between gap-2">
+                                                                                    <div>
+                                                                                        <div className="font-bold text-gray-800 text-sm">{item.name}</div>
+                                                                                        {item.brand && <div className="text-[10px] text-gray-500 uppercase tracking-wider">{item.brand}</div>}
+                                                                                    </div>
+                                                                                    <div className="text-right flex-shrink-0">
+                                                                                        <div className="font-bold text-orange-600 text-sm">฿{item.price}</div>
+                                                                                        <div className="text-[10px] text-gray-400">{item.unitQuantity || 1} {item.unitType || 'ชิ้น'}</div>
+                                                                                    </div>
+                                                                                </div>
+
+                                                                                {/* Store row with searchable edit */}
+                                                                                <div className="mt-2 flex items-center gap-2">
+                                                                                    <Store size={12} className="text-gray-400 flex-shrink-0" />
+                                                                                    {adminTab === 'manage' ? (
+                                                                                        <div className="flex-1">
+                                                                                            {editingStoreItemId === item.id ? (
+                                                                                                <div className="flex items-center gap-1">
+                                                                                                    <div className="flex-1 relative">
+                                                                                                        <input
+                                                                                                            type="text"
+                                                                                                            value={editStoreValue}
+                                                                                                            onChange={e => { setEditStoreValue(e.target.value); setStoreSearchQuery(e.target.value); }}
+                                                                                                            placeholder="พิมพ์หรือค้นหาชื่อร้าน..."
+                                                                                                            className="w-full text-xs p-1.5 border border-orange-300 rounded focus:border-orange-500 focus:outline-none"
+                                                                                                            autoFocus
+                                                                                                        />
+                                                                                                        {/* Suggestions dropdown */}
+                                                                                                        {storeSearchQuery && allStoreNames.filter(s => s.toLowerCase().includes(storeSearchQuery.toLowerCase()) && s !== editStoreValue).length > 0 && (
+                                                                                                            <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-b shadow-lg z-20 max-h-32 overflow-y-auto">
+                                                                                                                {allStoreNames.filter(s => s.toLowerCase().includes(storeSearchQuery.toLowerCase())).map(s => (
+                                                                                                                    <div
+                                                                                                                        key={s}
+                                                                                                                        onClick={() => { setEditStoreValue(s); setStoreSearchQuery(''); }}
+                                                                                                                        className="px-3 py-1.5 text-xs hover:bg-orange-50 cursor-pointer text-gray-700 border-b border-gray-50 last:border-0"
+                                                                                                                    >
+                                                                                                                        {s}
+                                                                                                                    </div>
+                                                                                                                ))}
+                                                                                                            </div>
+                                                                                                        )}
+                                                                                                    </div>
+                                                                                                    <button onClick={() => handleSaveStore(item.id)} className="bg-orange-500 text-white text-[10px] px-2 py-1 rounded font-bold">บันทึก</button>
+                                                                                                    <button onClick={() => { setEditingStoreItemId(null); setStoreSearchQuery(''); }} className="bg-gray-200 text-gray-600 text-[10px] px-2 py-1 rounded font-bold">ยกเลิก</button>
+                                                                                                </div>
+                                                                                            ) : (
+                                                                                                <span
+                                                                                                    className="text-xs text-gray-600 cursor-pointer hover:text-orange-600 hover:underline transition-colors"
+                                                                                                    onClick={() => { setEditingStoreItemId(item.id); setEditStoreValue(item.store || ''); setStoreSearchQuery(''); }}
+                                                                                                >
+                                                                                                    {item.store || 'ไม่ระบุร้าน'} <span className="text-orange-400 text-[9px]">✎</span>
+                                                                                                </span>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    ) : (
+                                                                                        <span className="text-xs text-gray-800">{item.store || 'ไม่ระบุร้าน'}</span>
+                                                                                    )}
+                                                                                </div>
+
+                                                                                {/* Tags display + admin add */}
+                                                                                <div className="mt-2 flex flex-wrap items-center gap-1">
+                                                                                    <Tag size={10} className="text-gray-400" />
+                                                                                    {(item.tags && item.tags.length > 0) ? item.tags.map(tag => (
+                                                                                        <span key={tag} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[9px] flex items-center gap-1 group">
+                                                                                            #{tag}
+                                                                                            {adminTab === 'manage' && (
+                                                                                                <button onClick={() => handleRemoveTag(item.id, item.tags, tag)} className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity">
+                                                                                                    <X size={8} />
+                                                                                                </button>
+                                                                                            )}
+                                                                                        </span>
+                                                                                    )) : <span className="text-[9px] text-gray-300 italic">ไม่มีแท็ก</span>}
+                                                                                    {adminTab === 'manage' && (
+                                                                                        adminTagItemId === item.id ? (
+                                                                                            <div className="flex items-center gap-1">
+                                                                                                <input
+                                                                                                    type="text"
+                                                                                                    value={adminTagValue}
+                                                                                                    onChange={e => setAdminTagValue(e.target.value)}
+                                                                                                    onKeyDown={e => { if (e.key === 'Enter') handleAddAdminTag(item.id, item.tags); }}
+                                                                                                    placeholder="เพิ่มแท็ก..."
+                                                                                                    className="text-[9px] px-1.5 py-0.5 border border-orange-300 rounded focus:outline-none focus:border-orange-500 w-20"
+                                                                                                    autoFocus
+                                                                                                />
+                                                                                                <button onClick={() => handleAddAdminTag(item.id, item.tags)} className="bg-orange-500 text-white text-[8px] px-1.5 py-0.5 rounded font-bold">เพิ่ม</button>
+                                                                                                <button onClick={() => { setAdminTagItemId(null); setAdminTagValue(''); }} className="text-gray-400 hover:text-gray-600"><X size={10} /></button>
+                                                                                            </div>
+                                                                                        ) : (
+                                                                                            <button
+                                                                                                onClick={() => setAdminTagItemId(item.id)}
+                                                                                                className="text-[9px] text-orange-500 hover:text-orange-700 font-bold px-1"
+                                                                                            >+ เพิ่มแท็ก</button>
+                                                                                        )
+                                                                                    )}
+                                                                                </div>
+
+                                                                                {/* Date & Extras */}
+                                                                                <div className="mt-1 flex flex-wrap items-center justify-between text-[10px] text-gray-400">
+                                                                                    <div className="flex gap-2">
+                                                                                        <span>{item.lastUpdated ? new Date(item.lastUpdated).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}</span>
+                                                                                        {item.shippingType === 'excluded' && item.shippingFee > 0 && <span className="text-blue-500">+ค่าส่ง ฿{item.shippingFee}</span>}
+                                                                                        {item.cashbackUsed && <span className="text-green-600">cashback ฿{item.cashbackAmount}</span>}
+                                                                                        {item.promoCodeUsed && item.promoCode && <span className="text-blue-600">promo: {item.promoCode}</span>}
+                                                                                        {item.adminStatus === 'disapproved' && <span className="text-red-500 font-bold">✗ ไม่อนุมัติ</span>}
+                                                                                    </div>
+
+                                                                                    {/* Move & Delete Actions Container */}
+                                                                                    {adminTab === 'manage' && (
+                                                                                        <div className="flex gap-2 relative">
+                                                                                            {moveItemId === item.id ? (
+                                                                                                <div className="absolute right-full mr-2 bg-white shadow-lg border border-gray-200 rounded p-1 flex items-center gap-1 z-10 whitespace-nowrap">
+                                                                                                    <select
+                                                                                                        value={moveTargetName}
+                                                                                                        onChange={e => setMoveTargetName(e.target.value)}
+                                                                                                        className="text-xs p-1 border border-blue-300 rounded focus:border-blue-500 focus:outline-none"
+                                                                                                    >
+                                                                                                        <option value="">-- ปลายทาง --</option>
+                                                                                                        {uniqueProductNames.filter(n => n !== item.name).map(n => (
+                                                                                                            <option key={n} value={n}>{n}</option>
+                                                                                                        ))}
+                                                                                                    </select>
+                                                                                                    <button onClick={() => handleMoveItem(item.id)} className="bg-blue-500 text-white text-[10px] px-1.5 py-1 rounded font-bold"><ArrowRight size={10} /> ย้าย</button>
+                                                                                                    <button onClick={() => { setMoveItemId(null); setMoveTargetName(''); }} className="bg-gray-200 text-gray-600 text-[10px] px-1.5 py-1 rounded">ปิด</button>
+                                                                                                </div>
+                                                                                            ) : (
+                                                                                                <button
+                                                                                                    onClick={() => setMoveItemId(item.id)}
+                                                                                                    className="text-[10px] text-blue-500 hover:text-blue-700 font-bold flex items-center gap-0.5 transition-colors"
+                                                                                                >
+                                                                                                    <ArrowRight size={10} /> ย้ายกลุ่ม
+                                                                                                </button>
+                                                                                            )}
+
+                                                                                            {isDeleteMode && (
+                                                                                                <button
+                                                                                                    onClick={() => handleDeletePost(item.id)}
+                                                                                                    className="text-[10px] text-red-500 hover:text-white hover:bg-red-500 border border-red-500 px-1.5 py-0.5 rounded transition-colors"
+                                                                                                >
+                                                                                                    ลบโพสต์
+                                                                                                </button>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </React.Fragment>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+
+                        {/* ============ NOTIFICATIONS TAB ============ */}
+                        {adminTab === 'notifications' && (
+                            <div className="space-y-3">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Bell size={20} className="text-orange-500" /> รอตรวจสอบ (ใหม่สุดก่อน)</h2>
+                                    <span className="text-sm text-gray-400">{pendingItems.length} รายการรอตรวจ</span>
+                                </div>
+                                {pendingItems.length === 0 ? (
+                                    <div className="text-center text-gray-400 py-16">
+                                        <Check size={48} className="mx-auto mb-3 text-green-300" />
+                                        <p className="text-green-600 font-bold">ตรวจสอบครบแล้ว!</p>
+                                        <p className="text-xs text-gray-400 mt-1">ไม่มีโพสต์ที่รอดำเนินการ</p>
+                                    </div>
+                                ) : pendingItems.map(item => (
+                                    <div key={item.id} className={`rounded-xl shadow-sm hover:shadow-md transition-shadow flex overflow-hidden ${item.adminStatus === 'disapproved' ? 'border-2 border-red-400 bg-red-50/30' : 'border border-gray-200 bg-white'}`}>
+                                        {/* LEFT: Approve Capsule Button */}
+                                        <button
+                                            onClick={() => handleSetAdminStatus(item.id, 'approved')}
+                                            className="flex-shrink-0 w-10 flex items-center justify-center transition-colors bg-green-100 text-green-500 hover:bg-green-500 hover:text-white"
+                                            title="อนุมัติ (จะหายไปจากรายการ)"
+                                        >
+                                            <Check size={18} strokeWidth={3} />
+                                        </button>
+
+                                        {/* CENTER: Content */}
+                                        <div className="flex-1 p-4">
+                                            <div className="flex gap-4">
+                                                {/* Image Preview */}
+                                                <div className="w-16 h-16 rounded-lg bg-gray-100 flex-shrink-0 overflow-hidden border border-gray-200">
+                                                    {item.image ? <img src={item.image} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-300"><ImageIcon size={20} /></div>}
+                                                </div>
+
+                                                {/* Info */}
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-start justify-between gap-2">
+                                                        <div>
+                                                            <div className="font-bold text-gray-800 text-sm">{item.name}</div>
+                                                            {item.brand && <div className="text-[10px] text-gray-500 uppercase tracking-wider">{item.brand}</div>}
+                                                        </div>
+                                                        <div className="text-right flex-shrink-0">
+                                                            <div className="font-bold text-orange-600 text-sm">฿{item.price}</div>
+                                                            <div className="text-[10px] text-gray-400">{item.unitQuantity || 1} {item.unitType || 'ชิ้น'}</div>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Store row with searchable edit */}
+                                                    <div className="mt-2 flex items-center gap-2">
+                                                        <Store size={12} className="text-gray-400 flex-shrink-0" />
+                                                        {editingStoreItemId === item.id ? (
+                                                            <div className="flex-1">
+                                                                <div className="flex items-center gap-1">
+                                                                    <div className="flex-1 relative">
+                                                                        <input
+                                                                            type="text"
+                                                                            value={editStoreValue}
+                                                                            onChange={e => { setEditStoreValue(e.target.value); setStoreSearchQuery(e.target.value); }}
+                                                                            placeholder="พิมพ์หรือค้นหาชื่อร้าน..."
+                                                                            className="w-full text-xs p-1.5 border border-orange-300 rounded focus:border-orange-500 focus:outline-none"
+                                                                            autoFocus
+                                                                        />
+                                                                        {/* Suggestions dropdown */}
+                                                                        {storeSearchQuery && allStoreNames.filter(s => s.toLowerCase().includes(storeSearchQuery.toLowerCase()) && s !== editStoreValue).length > 0 && (
+                                                                            <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-b shadow-lg z-20 max-h-32 overflow-y-auto">
+                                                                                {allStoreNames.filter(s => s.toLowerCase().includes(storeSearchQuery.toLowerCase())).map(s => (
+                                                                                    <div
+                                                                                        key={s}
+                                                                                        onClick={() => { setEditStoreValue(s); setStoreSearchQuery(''); }}
+                                                                                        className="px-3 py-1.5 text-xs hover:bg-orange-50 cursor-pointer text-gray-700 border-b border-gray-50 last:border-0"
+                                                                                    >
+                                                                                        {s}
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                    <button onClick={() => handleSaveStore(item.id)} className="bg-orange-500 text-white text-[10px] px-2 py-1 rounded font-bold">บันทึก</button>
+                                                                    <button onClick={() => { setEditingStoreItemId(null); setStoreSearchQuery(''); }} className="bg-gray-200 text-gray-600 text-[10px] px-2 py-1 rounded font-bold">ยกเลิก</button>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <span
+                                                                className="text-xs text-gray-600 cursor-pointer hover:text-orange-600 hover:underline transition-colors"
+                                                                onClick={() => { setEditingStoreItemId(item.id); setEditStoreValue(item.store || ''); setStoreSearchQuery(''); }}
+                                                            >
+                                                                {item.store || 'ไม่ระบุร้าน'} <span className="text-orange-400 text-[9px]">✎</span>
+                                                            </span>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Tags display + admin add */}
+                                                    <div className="mt-2 flex flex-wrap items-center gap-1">
+                                                        <Tag size={10} className="text-gray-400" />
+                                                        {(item.tags && item.tags.length > 0) ? item.tags.map(tag => (
+                                                            <span key={tag} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[9px] flex items-center gap-1 group">
+                                                                #{tag}
+                                                                <button onClick={() => handleRemoveTag(item.id, item.tags, tag)} className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity">
+                                                                    <X size={8} />
+                                                                </button>
+                                                            </span>
+                                                        )) : <span className="text-[9px] text-gray-300 italic">ไม่มีแท็ก</span>}
+                                                        {adminTagItemId === item.id ? (
+                                                            <div className="flex items-center gap-1">
+                                                                <input
+                                                                    type="text"
+                                                                    value={adminTagValue}
+                                                                    onChange={e => setAdminTagValue(e.target.value)}
+                                                                    onKeyDown={e => { if (e.key === 'Enter') handleAddAdminTag(item.id, item.tags); }}
+                                                                    placeholder="เพิ่มแท็ก..."
+                                                                    className="text-[9px] px-1.5 py-0.5 border border-orange-300 rounded focus:outline-none focus:border-orange-500 w-20"
+                                                                    autoFocus
+                                                                />
+                                                                <button onClick={() => handleAddAdminTag(item.id, item.tags)} className="bg-orange-500 text-white text-[8px] px-1.5 py-0.5 rounded font-bold">เพิ่ม</button>
+                                                                <button onClick={() => { setAdminTagItemId(null); setAdminTagValue(''); }} className="text-gray-400 hover:text-gray-600"><X size={10} /></button>
+                                                            </div>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() => setAdminTagItemId(item.id)}
+                                                                className="text-[9px] text-orange-500 hover:text-orange-700 font-bold px-1"
+                                                            >+ เพิ่มแท็ก</button>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Date & shipping & promo */}
+                                                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-gray-400">
+                                                        <span>{item.lastUpdated ? new Date(item.lastUpdated).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}</span>
+                                                        {item.shippingType === 'excluded' && item.shippingFee > 0 && <span className="text-blue-500">+ค่าส่ง ฿{item.shippingFee}</span>}
+                                                        {item.cashbackUsed && <span className="text-green-600">cashback ฿{item.cashbackAmount}</span>}
+                                                        {item.promoCodeUsed && item.promoCode && <span className="text-blue-600">promo: {item.promoCode}</span>}
+                                                        {item.adminStatus === 'disapproved' && <span className="text-red-500 font-bold">✗ ไม่อนุมัติ</span>}
+                                                    </div>
+
+                                                    {/* Move to Group action */}
+                                                    <div className="mt-3 border-t border-gray-100 pt-2">
+                                                        {moveItemId === item.id ? (
+                                                            <div className="flex items-center gap-2">
+                                                                <select
+                                                                    value={moveTargetName}
+                                                                    onChange={e => setMoveTargetName(e.target.value)}
+                                                                    className="flex-1 text-xs p-1.5 border border-blue-300 rounded focus:border-blue-500 focus:outline-none bg-white"
+                                                                >
+                                                                    <option value="">-- เลือกกลุ่มสินค้าปลายทาง --</option>
+                                                                    {uniqueProductNames.filter(n => n !== item.name).map(n => (
+                                                                        <option key={n} value={n}>{n}</option>
+                                                                    ))}
+                                                                </select>
+                                                                <button onClick={() => handleMoveItem(item.id)} className="bg-blue-500 text-white text-[10px] px-2 py-1 rounded font-bold flex items-center gap-1"><ArrowRight size={12} /> ย้าย</button>
+                                                                <button onClick={() => { setMoveItemId(null); setMoveTargetName(''); }} className="bg-gray-200 text-gray-600 text-[10px] px-2 py-1 rounded font-bold">ยกเลิก</button>
+                                                            </div>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() => setMoveItemId(item.id)}
+                                                                className="text-[10px] text-blue-500 hover:text-blue-700 font-bold flex items-center gap-1 transition-colors"
+                                                            >
+                                                                <ArrowRight size={12} /> ย้ายไปกลุ่มอื่น
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* RIGHT: Disapprove Capsule Button */}
+                                        <button
+                                            onClick={() => handleSetAdminStatus(item.id, item.adminStatus === 'disapproved' ? '' : 'disapproved')}
+                                            className={`flex-shrink-0 w-10 flex items-center justify-center transition-colors ${item.adminStatus === 'disapproved' ? 'bg-red-500 text-white' : 'bg-red-100 text-red-400 hover:bg-red-200'}`}
+                                            title="ไม่อนุมัติ"
+                                        >
+                                            <XCircle size={18} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* ============ BIN TAB ============ */}
+                        {adminTab === 'bin' && (
+                            <div className="space-y-3">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Trash2 size={20} className="text-gray-500" /> ถังขยะ (รายการที่ถูกลบ)</h2>
+                                    <span className="text-sm text-gray-400">{deletedItems.length} รายการในถังขยะ</span>
+                                </div>
+                                {deletedItems.length === 0 ? (
+                                    <div className="text-center text-gray-400 py-16 bg-white rounded-xl border border-gray-200 border-dashed">
+                                        <Trash2 size={48} className="mx-auto mb-3 text-gray-200" />
+                                        <p className="text-gray-500 font-bold">ถังขยะว่างเปล่า</p>
+                                        <p className="text-xs text-gray-400 mt-1">ไม่มีข้อมูลที่ถูกลบในขณะนี้</p>
+                                    </div>
+                                ) : deletedItems.map(item => (
+                                    <div key={item.id} className="rounded-xl shadow-sm border border-gray-200 bg-white flex overflow-hidden opacity-75 hover:opacity-100 transition-opacity grayscale hover:grayscale-0">
+                                        {/* LEFT: Recover Button */}
+                                        <button
+                                            onClick={() => handleRecoverPost(item.id)}
+                                            className="flex-shrink-0 w-12 flex flex-col items-center justify-center transition-colors bg-green-50 text-green-600 hover:bg-green-500 hover:text-white border-r border-gray-100"
+                                            title="กู้คืนข้อมูลนี้"
+                                        >
+                                            <RefreshCw size={16} strokeWidth={2.5} className="mb-1" />
+                                            <span className="text-[9px] font-bold">กู้คืน</span>
+                                        </button>
+
+                                        {/* CENTER: Content */}
+                                        <div className="flex-1 p-4">
+                                            <div className="flex gap-4">
+                                                {/* Image Preview */}
+                                                <div className="w-16 h-16 rounded-lg bg-gray-100 flex-shrink-0 overflow-hidden border border-gray-200">
+                                                    {item.image ? <img src={item.image} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-300"><ImageIcon size={20} /></div>}
+                                                </div>
+
+                                                {/* Info */}
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-start justify-between gap-2">
+                                                        <div>
+                                                            <div className="font-bold text-gray-800 text-sm line-through decoration-red-400">{item.name}</div>
+                                                            {item.brand && <div className="text-[10px] text-gray-500 uppercase tracking-wider">{item.brand}</div>}
+                                                        </div>
+                                                        <div className="text-right flex-shrink-0">
+                                                            <div className="font-bold text-gray-500 text-sm">฿{item.price}</div>
+                                                            <div className="text-[10px] text-gray-400">{item.unitQuantity || 1} {item.unitType || 'ชิ้น'}</div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="mt-2 text-xs text-gray-500">
+                                                        <Store size={12} className="inline mr-1" /> {item.store || 'ไม่ระบุร้าน'}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* RIGHT: Permanent Delete Button */}
+                                        <button
+                                            onClick={() => handlePermanentDeletePost(item.id)}
+                                            className="flex-shrink-0 w-12 flex flex-col items-center justify-center transition-colors bg-red-50 text-red-600 hover:bg-red-600 hover:text-white border-l border-gray-100"
+                                            title="ลบถาวร"
+                                        >
+                                            <Trash2 size={16} className="mb-1" />
+                                            <span className="text-[9px] font-bold">ลบถาวร</span>
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                         {adminTab === 'merge' && selectedForMerge.length >= 2 && (
                             <div className="fixed bottom-10 inset-x-0 flex justify-center z-20 animate-fade-in pointer-events-none">
                                 <button
@@ -481,6 +1154,34 @@
                                 >
                                     <CheckSquare size={24} /> รวมข้อมูล {selectedForMerge.length} รายการที่เลือก
                                 </button>
+                            </div>
+                        )}
+
+                        {/* DELETE CONFIRMATION MODAL */}
+                        {deleteModalTarget && (
+                            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+                                <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col">
+                                    <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-red-50">
+                                        <h2 className="text-xl font-bold flex items-center gap-2 text-red-600"><AlertCircle className="text-red-500" /> ยืนยันการลบข้อมูล</h2>
+                                        <button onClick={() => setDeleteModalTarget(null)} className="text-gray-400 hover:text-gray-600"><X size={24} /></button>
+                                    </div>
+                                    <div className="p-6 space-y-4">
+                                        <p className="text-gray-600">
+                                            คุณแน่ใจหรือไม่ว่าต้องการลบ <strong>{deleteModalTarget.itemName}</strong>?
+                                        </p>
+                                        <p className="text-xs text-gray-500 bg-gray-50 p-3 rounded-lg border border-gray-100">
+                                            ข้อมูลนี้จะถูกย้ายไปที่ <Trash2 size={12} className="inline mr-1" /><strong>ถังขยะ</strong> คุณสามารถกู้คืนได้ภายหลังหรือลบอย่างถาวรในถังขยะ
+                                        </p>
+                                    </div>
+                                    <div className="p-6 border-t border-gray-100 bg-slate-50 flex justify-end gap-3">
+                                        <button onClick={() => setDeleteModalTarget(null)} className="px-6 py-2.5 rounded-lg font-bold text-gray-600 bg-white border border-gray-200 shadow-sm hover:bg-gray-50 transition-colors">
+                                            ยกเลิก
+                                        </button>
+                                        <button onClick={confirmDelete} className="px-6 py-2.5 rounded-lg font-bold text-white bg-red-500 hover:bg-red-600 shadow-md hover:shadow-lg transition-all flex items-center gap-2">
+                                            <Trash2 size={18} /> ลบข้อมูล
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         )}
 
@@ -565,10 +1266,11 @@
                                     </div>
                                 </div>
                             </div>
-                        )}
+                        )
+                        }
 
-                    </main>
-                </div>
+                    </main >
+                </div >
             );
         }
 

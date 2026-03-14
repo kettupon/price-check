@@ -6,6 +6,40 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>DealHunter Prototype</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        green: {
+                            50: '#f0f9eb',
+                            100: '#dbf2ce',
+                            200: '#bae6a1',
+                            300: '#92d571',
+                            400: '#6dc147',
+                            500: '#48A111',
+                            600: '#387e0d',
+                            700: '#2c610b',
+                            800: '#214709',
+                            900: '#183107',
+                        },
+                        orange: {
+                            50: '#fffcf1',
+                            100: '#fff6db',
+                            200: '#ffebb5',
+                            300: '#ffdc89',
+                            400: '#ffbd45',
+                            500: '#FF8C00',
+                            600: '#e67300',
+                            700: '#bf5700',
+                            800: '#994000',
+                            900: '#7d3300',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700;800&display=swap');
 
@@ -61,12 +95,12 @@
     <div id="root"></div>
 
     <script type="text/babel" data-type="module">
-        import React, { useState, useEffect } from 'react';
+        import React, { useState, useEffect, useRef } from 'react';
         import { createRoot } from 'react-dom/client';
         import {
             MapPin, Users, Tag, AlertCircle, Plus, Trophy, Heart, MessageSquare,
             Share2, Search, Zap, Home, ListPlus, Calculator, ChevronLeft, Image as ImageIcon,
-            Coffee, ShoppingCart, Store, Package, User, X, ShoppingBag, ImageOff
+            Coffee, ShoppingCart, Store, Package, User, X, ShoppingBag, ImageOff, Camera
         } from 'lucide-react';
         import { initializeApp } from 'firebase/app';
         import { getFirestore, collection, addDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
@@ -87,6 +121,7 @@
         function App() {
             const [currentView, setCurrentView] = useState('feed'); // 'feed' | 'search' | 'add' | 'profile' | 'product_detail'
             const [activeTab, setActiveTab] = useState('ทั้งหมด');
+            const [showShippingInFeed, setShowShippingInFeed] = useState(false);
             const [profileTab, setProfileTab] = useState('posts'); // 'posts' | 'likes'
             const [showDuplicatePrompt, setShowDuplicatePrompt] = useState(false);
             const [deals, setDeals] = useState([]);
@@ -115,6 +150,8 @@
                         const totalPrice = Math.max(0, numPrice - numCashback);
                         const unitQty = parseInt(data.unitQuantity) || 1;
                         const ppu = totalPrice / unitQty;
+                        const shipFee = (data.shippingType === 'excluded') ? (parseFloat(data.shippingFee) || 0) : 0;
+                        const ppuWithShipping = (totalPrice + shipFee) / unitQty;
 
                         return {
                             id: doc.id,
@@ -122,6 +159,7 @@
                             brand: data.brand || "",
                             price: data.price, // Raw price
                             ppu: ppu, // Price Per Unit
+                            ppuWithShipping: ppuWithShipping, // PPU including shipping
                             totalPrice: totalPrice, // Price after cashback
                             unitQuantity: unitQty,
                             unitType: data.unitType || "ชิ้น",
@@ -131,12 +169,15 @@
                             type: data.category || "General",
                             masterImage: data.masterImage || "",
                             stickers: ppu < 10 ? ["🔥 คุ้มสุด!"] : [],
-                            likes: Math.floor(Math.random() * 50),
-                            comments: Math.floor(Math.random() * 10),
+                            likes: 0,
+                            comments: 0,
                             image: data.image || "", // Empty if no image
-                            timePosted: new Date(data.lastUpdated).toLocaleTimeString(),
+                            timePosted: new Date(data.lastUpdated).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }),
                             reporter: "Live User",
-                            cashbackUsed: data.cashbackUsed || false
+                            cashbackUsed: data.cashbackUsed || false,
+                            tags: data.tags || [],
+                            shippingType: data.shippingType || 'included',
+                            shippingFee: data.shippingFee || 0
                         };
                     });
                     setDeals(fbDeals);
@@ -154,17 +195,27 @@
                                 masterImage: deal.masterImage || deal.image,
                                 lowestPrice: deal.price,
                                 lowestPpu: deal.ppu, // Use PPU for Best Value
+                                lowestPpuWithShipping: deal.ppuWithShipping,
                                 lowestPpuUnit: deal.unitType,
                                 normalPrice: deal.normalPrice,
                                 postsCount: 1,
-                                stickers: deal.stickers
+                                stickers: deal.stickers,
+                                tags: [...deal.tags] // Keep track of unique tags per group
                             };
                         } else {
                             grouped[name].postsCount += 1;
                             grouped[name].lowestPrice = Math.min(grouped[name].lowestPrice, deal.price);
                             grouped[name].lowestPpu = Math.min(grouped[name].lowestPpu, deal.ppu);
+                            grouped[name].lowestPpuWithShipping = Math.min(grouped[name].lowestPpuWithShipping, deal.ppuWithShipping);
                             if (deal.masterImage && (!grouped[name].masterImage || grouped[name].masterImage === grouped[name].image)) {
                                 grouped[name].masterImage = deal.masterImage;
+                            }
+                            if (deal.tags && deal.tags.length > 0) {
+                                deal.tags.forEach(tag => {
+                                    if (!grouped[name].tags.includes(tag)) {
+                                        grouped[name].tags.push(tag);
+                                    }
+                                });
                             }
                         }
                     });
@@ -180,18 +231,64 @@
             const [store, setStore] = useState('');
             const [price, setPrice] = useState('');
             const [unit, setUnit] = useState(1);
+            const [unitDisplay, setUnitDisplay] = useState('1'); // String used only for the input field
             const [unitType, setUnitType] = useState('ชิ้น');
-            const [shippingType, setShippingType] = useState(null); // 'included', 'excluded', null
+            const [shippingType, setShippingType] = useState('included'); // 'included', 'excluded', null
             const [shippingFee, setShippingFee] = useState('');
+            const [tags, setTags] = useState([]);
+            const [tagInput, setTagInput] = useState('');
             const [usePromo, setUsePromo] = useState(false);
+            const [promoCode, setPromoCode] = useState(''); // New state for Promo Code text
             const [useCashback, setUseCashback] = useState(false);
             const [cashbackAmount, setCashbackAmount] = useState('');
+            const [includeShippingInPpu, setIncludeShippingInPpu] = useState(false); // Toggle to see real price with shipping
+            const [imageBase64, setImageBase64] = useState(null); // Photo capture
+            const fileInputRef = useRef(null);
+
+            // Handle image capture / upload
+            const handleImageCapture = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const img = new window.Image();
+                    img.onload = () => {
+                        const maxSize = 800;
+                        let w = img.width, h = img.height;
+                        if (w > maxSize || h > maxSize) {
+                            if (w > h) { h = Math.round(h * maxSize / w); w = maxSize; }
+                            else { w = Math.round(w * maxSize / h); h = maxSize; }
+                        }
+                        const canvas = document.createElement('canvas');
+                        canvas.width = w; canvas.height = h;
+                        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                        setImageBase64(canvas.toDataURL('image/jpeg', 0.7));
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            };
 
             // คำนวณ PPU (Price Per Unit) Real-time
             const numPrice = parseFloat(price) || 0;
             const numCashback = useCashback ? (parseFloat(cashbackAmount) || 0) : 0;
-            const totalPrice = Math.max(0, numPrice - numCashback);
+            const addedShipping = (shippingType === 'excluded' && includeShippingInPpu) ? (parseFloat(shippingFee) || 0) : 0;
+            const totalPrice = Math.max(0, numPrice - numCashback + addedShipping);
             const ppu = unit > 0 ? (totalPrice / unit) : 0;
+
+            const handleAddTag = (e) => {
+                if (e.key === 'Enter' || e.key === ',') {
+                    e.preventDefault();
+                    const val = tagInput.trim().replace(',', '').toLowerCase();
+                    if (val && !tags.includes(val) && tags.length < 5) {
+                        setTags([...tags, val]);
+                    }
+                    setTagInput('');
+                }
+            };
+            const removeTag = (tagToRemove) => {
+                setTags(tags.filter(t => t !== tagToRemove));
+            };
 
             // --- Handlers ---
             const handleSaveDeal = async () => {
@@ -208,8 +305,14 @@
                         price: parseFloat(price),
                         unitQuantity: parseInt(unit) || 1,
                         unitType: unitType,
+                        shippingType: shippingType,
+                        shippingFee: shippingType === 'excluded' ? (parseFloat(shippingFee) || 0) : 0,
+                        tags: tags,
+                        promoCodeUsed: usePromo,
+                        promoCode: usePromo ? promoCode : '',
                         cashbackUsed: useCashback,
                         cashbackAmount: useCashback ? (parseFloat(cashbackAmount) || 0) : 0,
+                        image: imageBase64 || '',
                         lastUpdated: Date.now()
                     });
                     setShowDuplicatePrompt(true);
@@ -223,7 +326,9 @@
                 setShowDuplicatePrompt(false);
                 setCurrentView('feed'); // กลับไปหน้าหลัก
                 // Reset Form
-                setItemName(''); setBrand(''); setPrice(''); setUnit(1); setStore(''); setUseCashback(false); setCashbackAmount('');
+                setItemName(''); setBrand(''); setPrice(''); setUnit(1); setUnitDisplay('1'); setStore(''); setUseCashback(false); setCashbackAmount('');
+                setUsePromo(false); setPromoCode(''); setImageBase64(null);
+                setTags([]); setTagInput(''); setShippingType('included'); setShippingFee(''); setIncludeShippingInPpu(false);
             };
 
             // --- Views Components ---
@@ -231,26 +336,23 @@
                 <div className="flex-1 overflow-y-auto bg-gray-50 pb-24 animate-fade-in">
                     {/* Profile Header */}
                     <div className="bg-white p-6 border-b border-gray-100 flex flex-col items-center">
-                        <div className="w-24 h-24 bg-gradient-to-br from-orange-400 to-red-500 rounded-full flex items-center justify-center text-white text-4xl font-bold shadow-lg mb-3 border-4 border-white outline outline-gray-100">
-                            G
+                        <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center text-gray-300 text-4xl mb-3 border-4 border-white outline outline-gray-100">
+                            <User size={40} />
                         </div>
-                        <h2 className="text-xl font-bold text-gray-800">Get_Hunter</h2>
-                        <div className="flex items-center gap-2 mt-2">
-                            <span className="px-3 py-1 bg-yellow-100 text-yellow-700 text-xs font-bold rounded-full flex items-center gap-1">
-                                <Trophy size={12} /> Searcher
-                            </span>
-                            <span className="text-sm text-gray-500 font-medium">1,250 Pts</span>
-                        </div>
+                        <h2 className="text-xl font-bold text-gray-800">ผู้เยี่ยมชม (Guest)</h2>
+                        <button onClick={() => alert('ฟังก์ชันเข้าสู่ระบบจะเปิดให้บริการเร็วๆนี้')} className="mt-3 px-6 py-2 bg-green-500 hover:bg-green-600 text-white text-sm font-bold rounded-full transition-colors">
+                            เข้าสู่ระบบ / สมัครสมาชิก
+                        </button>
 
-                        {/* Quick Stats */}
-                        <div className="flex gap-6 mt-6 w-full justify-center">
+                        {/* Quick Stats Placeholder */}
+                        <div className="flex gap-6 mt-6 w-full justify-center opacity-50">
                             <div className="text-center">
-                                <div className="text-2xl font-bold text-gray-800">12</div>
+                                <div className="text-2xl font-bold text-gray-800">0</div>
                                 <div className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">บอกต่อ</div>
                             </div>
                             <div className="w-px bg-gray-200"></div>
                             <div className="text-center">
-                                <div className="text-2xl font-bold text-gray-800">348</div>
+                                <div className="text-2xl font-bold text-gray-800">0</div>
                                 <div className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">ถูกใจรวม</div>
                             </div>
                         </div>
@@ -289,10 +391,10 @@
                                     <div className="flex justify-between items-end">
                                         <div className="text-lg font-bold text-red-500">฿{deal.price}</div>
                                         <div className="flex items-center gap-3 text-xs text-gray-400">
-                                            <span className="flex items-center gap-1">
+                                            <span onClick={() => alert('กรุณาลงทะเบียนเข้าสู่ระบบเพื่อใช้งานฟังก์ชันนี้')} className="flex items-center gap-1 cursor-pointer hover:text-red-500 transition-colors">
                                                 <Heart size={14} className={profileTab === 'likes' ? 'fill-red-500 text-red-500' : ''} /> {deal.likes}
                                             </span>
-                                            <span className="flex items-center gap-1">
+                                            <span onClick={() => alert('กรุณาลงทะเบียนเข้าสู่ระบบเพื่อใช้งานฟังก์ชันนี้')} className="flex items-center gap-1 cursor-pointer hover:text-blue-500 transition-colors">
                                                 <MessageSquare size={14} /> {deal.comments}
                                             </span>
                                         </div>
@@ -311,6 +413,15 @@
                 <div className="flex-1 overflow-y-auto p-3 bg-gray-100 pb-24 animate-fade-in">
                     {/* Categories / Tabs */}
                     <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-3 mb-1">
+                        <button
+                            onClick={() => setShowShippingInFeed(v => !v)}
+                            className={`whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-bold transition-colors shadow-sm flex items-center gap-1 ${showShippingInFeed
+                                ? 'bg-blue-500 text-white'
+                                : 'bg-white text-blue-500 border border-blue-300 hover:bg-blue-50'
+                                }`}
+                        >
+                            {"\u{1F69A}"} รวมราคาขนส่ง
+                        </button>
                         {['ทั้งหมด', 'ใกล้ฉัน (5km)', 'สกินแคร์', 'ของกิน', 'ของใช้ในบ้าน'].map(tab => (
                             <button
                                 key={tab}
@@ -339,8 +450,17 @@
                                         ))}
                                     </div>
                                     <div className="absolute bottom-0 right-0 bg-white/90 backdrop-blur px-1.5 py-0.5 rounded-tl-lg font-bold text-orange-500 flex flex-col items-end shadow-sm">
-                                        <span className="text-[9px] text-gray-400 line-through leading-none">฿{deal.normalPrice}</span>
-                                        <span className="text-xs leading-none mt-0.5">คุ้มสุด ฿{deal.lowestPpu?.toFixed(2)}/{deal.lowestPpuUnit}</span>
+                                        {showShippingInFeed ? (
+                                            <>
+                                                <span className="text-[8px] text-blue-500 font-bold leading-none">{"\u{1F69A}"} รวมค่าส่ง</span>
+                                                <span className="text-xs leading-none mt-0.5">คุ้มสุด ฿{deal.lowestPpuWithShipping?.toFixed(2)}/{deal.lowestPpuUnit}</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <span className="text-[9px] text-gray-400 line-through leading-none">฿{deal.normalPrice}</span>
+                                                <span className="text-xs leading-none mt-0.5">คุ้มสุด ฿{deal.lowestPpu?.toFixed(2)}/{deal.lowestPpuUnit}</span>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                                 <div className="p-2 flex-1 flex flex-col">
@@ -363,9 +483,6 @@
                     {/* DISPLAY ZONE (PPU Calculator) */}
                     <div className="flex-none bg-green-50/50 border-b border-green-100 p-6 flex flex-col justify-end items-end min-h-[160px] relative transition-all shadow-inner">
                         <div className="absolute top-4 left-4 flex gap-2">
-                            <span className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-yellow-100 text-yellow-600">
-                                {category}
-                            </span>
                             {store && (
                                 <span className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-gray-200 text-gray-600">
                                     {store}
@@ -391,7 +508,21 @@
                         {useCashback && cashbackAmount > 0 && (
                             <div className="mt-2 text-right">
                                 <span className="text-[10px] font-bold text-orange-400 uppercase tracking-widest">หักส่วนลดแล้วเหลือ</span>
-                                <div className="text-xl font-bold text-orange-500">฿{totalPrice}</div>
+                                <div className="text-xl font-bold text-orange-500">฿{Math.max(0, numPrice - numCashback)}</div>
+                            </div>
+                        )}
+
+                        {shippingType === 'excluded' && (
+                            <div className="mt-3 bg-white/60 p-2 rounded-xl border border-green-200">
+                                <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-gray-600">
+                                    <input
+                                        type="checkbox"
+                                        checked={includeShippingInPpu}
+                                        onChange={(e) => setIncludeShippingInPpu(e.target.checked)}
+                                        className="rounded text-green-500 focus:ring-green-500 w-4 h-4"
+                                    />
+                                    รวมค่าจัดส่งเพื่อดูราคาจริง (+฿{shippingFee || 0})
+                                </label>
                             </div>
                         )}
                     </div>
@@ -417,17 +548,30 @@
                             />
                         </div>
 
-                        {/* Category */}
+
+                        {/* Tags Input */}
                         <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">หมวดหมู่</label>
-                            <div className="grid grid-cols-2 gap-3">
-                                <button onClick={() => setCategory('Food')} className={`py-3 rounded-2xl flex items-center justify-center gap-2 border-2 transition-all ${category === 'Food' ? 'bg-yellow-50 text-yellow-600 border-yellow-200' : 'bg-gray-50 text-gray-400 border-transparent hover:bg-gray-100'}`}>
-                                    <Coffee size={20} /> <span className="font-bold text-xs uppercase">ของกิน</span>
-                                </button>
-                                <button onClick={() => setCategory('Grocery')} className={`py-3 rounded-2xl flex items-center justify-center gap-2 border-2 transition-all ${category === 'Grocery' ? 'bg-red-50 text-red-600 border-red-200' : 'bg-gray-50 text-gray-400 border-transparent hover:bg-gray-100'}`}>
-                                    <ShoppingCart size={20} /> <span className="font-bold text-xs uppercase">ของใช้</span>
-                                </button>
-                            </div>
+                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1 flex justify-between">
+                                <span>แท็ก (Tags) {tags.length}/5</span>
+                            </label>
+                            <input
+                                type="text" placeholder="กด Enter หรือ ลูกน้ำ (,) เพื่อเพิ่มแท็ก"
+                                value={tagInput}
+                                onChange={(e) => setTagInput(e.target.value)}
+                                onKeyDown={handleAddTag}
+                                disabled={tags.length >= 5}
+                                className="w-full p-3 bg-gray-50 rounded-xl text-sm font-semibold text-gray-700 border-2 border-transparent focus:border-green-500 outline-none disabled:opacity-50"
+                            />
+                            {tags.length > 0 && (
+                                <div className="flex flex-wrap gap-2 mt-2">
+                                    {tags.map(tag => (
+                                        <span key={tag} className="flex items-center gap-1 px-3 py-1.5 bg-green-50 text-green-700 rounded-lg text-xs font-bold border border-green-200">
+                                            <Tag size={12} /> {tag}
+                                            <button onClick={() => removeTag(tag)} className="ml-1 text-green-500 hover:text-green-800 focus:outline-none"><X size={12} /></button>
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
                         </div>
 
                         {/* Store Quick Select */}
@@ -461,26 +605,65 @@
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">จำนวน</label>
                                 <div className="flex h-[50px] bg-gray-50 rounded-xl overflow-hidden border-2 border-gray-100">
-                                    <button onClick={() => setUnit(Math.max(1, unit - 1))} className="px-4 bg-white hover:bg-gray-100 text-gray-600 font-bold text-lg border-r border-gray-100">-</button>
-                                    <input type="number" value={unit} onChange={(e) => setUnit(parseInt(e.target.value) || 1)} className="flex-1 bg-transparent text-center font-bold text-gray-800 text-sm outline-none" />
-                                    <button onClick={() => setUnit(unit + 1)} className="px-4 bg-white hover:bg-gray-100 text-gray-600 font-bold text-lg border-l border-gray-100">+</button>
+                                    <input
+                                        type="text"
+                                        inputMode="numeric"
+                                        pattern="[0-9]*"
+                                        value={unitDisplay}
+                                        onChange={(e) => {
+                                            const raw = e.target.value.replace(/[^0-9]/g, '');
+                                            setUnitDisplay(raw);
+                                            const parsed = parseInt(raw);
+                                            if (!isNaN(parsed) && parsed > 0) setUnit(parsed);
+                                        }}
+                                        onBlur={() => {
+                                            const safe = Math.max(1, parseInt(unitDisplay) || 1);
+                                            setUnit(safe);
+                                            setUnitDisplay(String(safe));
+                                        }}
+                                        className="flex-1 bg-transparent text-center font-bold text-gray-800 text-sm outline-none"
+                                    />
                                 </div>
                             </div>
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">หน่วย (ชิ้น/แพค)</label>
                                 <input type="text" value={unitType} onChange={(e) => setUnitType(e.target.value)} className="w-full h-[50px] p-3 bg-gray-50 rounded-xl text-sm font-semibold text-gray-700 border-2 border-transparent focus:border-green-500 outline-none text-center" />
                             </div>
+                            <div className="space-y-2 col-span-2">
+                                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">ค่าส่ง</label>
+                                <div className="grid grid-cols-2 gap-3 mb-2">
+                                    <button type="button" onClick={() => setShippingType('included')} className={`py-2 rounded-xl border-2 font-bold text-xs transition-colors ${shippingType === 'included' ? 'border-green-400 bg-green-50 text-green-600' : 'border-gray-100 bg-gray-50 text-gray-400'}`}>ส่งฟรี / รวมค่าส่งแล้ว</button>
+                                    <button type="button" onClick={() => setShippingType('excluded')} className={`py-2 rounded-xl border-2 font-bold text-xs transition-colors ${shippingType === 'excluded' ? 'border-orange-400 bg-orange-50 text-orange-600' : 'border-gray-100 bg-gray-50 text-gray-400'}`}>มีค่าส่งเพิ่ม</button>
+                                </div>
+                                {shippingType === 'excluded' && (
+                                    <input type="number" placeholder="ค่าส่ง (฿)" value={shippingFee} onChange={(e) => setShippingFee(e.target.value)} className="w-full h-[50px] p-3 bg-gray-50 rounded-xl text-sm font-semibold text-gray-700 border-2 border-transparent focus:border-orange-500 outline-none" />
+                                )}
+                            </div>
                         </div>
 
-                        {/* Cashback / Promo Toggle */}
+                        {/* Promo Code Toggle */}
+                        <div className="p-4 bg-blue-50/50 border border-blue-100 rounded-2xl space-y-3">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" checked={usePromo} onChange={(e) => setUsePromo(e.target.checked)} className="rounded text-blue-500 focus:ring-blue-500 w-4 h-4" />
+                                <span className="text-xs font-bold text-blue-600 flex items-center gap-1"><Zap size={14} /> โค้ดส่วนลด (Promo Code)</span>
+                            </label>
+                            {usePromo && (
+                                <input
+                                    type="text" placeholder="โค้ดส่วนลด เช่น HELLO20" value={promoCode} onChange={(e) => setPromoCode(e.target.value)}
+                                    className="w-full p-3 bg-white rounded-xl text-sm font-semibold text-blue-600 border-2 border-blue-200 outline-none uppercase"
+                                />
+                            )}
+                        </div>
+
+                        {/* Cashback Toggle */}
                         <div className="p-4 bg-orange-50/50 border border-orange-100 rounded-2xl space-y-3">
                             <label className="flex items-center gap-2 cursor-pointer">
                                 <input type="checkbox" checked={useCashback} onChange={(e) => setUseCashback(e.target.checked)} className="rounded text-orange-500 focus:ring-orange-500 w-4 h-4" />
-                                <span className="text-xs font-bold text-orange-600 flex items-center gap-1"><Zap size={14} /> มีส่วนลดเพิ่ม / เงินคืน (Cashback)</span>
+                                <span className="text-xs font-bold text-orange-600 flex items-center gap-1"><Zap size={14} /> เงินคืน (Cashback)</span>
                             </label>
                             {useCashback && (
                                 <input
-                                    type="number" placeholder="ส่วนลด (฿)" value={cashbackAmount} onChange={(e) => setCashbackAmount(e.target.value)}
+                                    type="number" placeholder="ยอดเงินคืน (฿)" value={cashbackAmount} onChange={(e) => setCashbackAmount(e.target.value)}
                                     className="w-full p-3 bg-white rounded-xl text-sm font-semibold text-orange-600 border-2 border-orange-200 outline-none"
                                 />
                             )}
@@ -488,17 +671,43 @@
 
                         {/* Photo Upload */}
                         <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">แนบรูปภาพสินค้า</label>
-                            <button className="w-full h-[60px] rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 hover:bg-gray-100 flex items-center justify-center gap-2 transition-colors">
-                                <ImageIcon size={20} className="text-gray-400" />
-                                <span className="text-xs font-bold text-gray-500">แตะเพื่อถ่ายรูปป้ายราคา</span>
-                            </button>
+                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">รูปภาพ</label>
+                            <p className="text-[10px] text-gray-400 ml-1 -mt-1">สินค้าและป้ายราคา</p>
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept="image/*"
+                                capture="environment"
+                                onChange={handleImageCapture}
+                                className="hidden"
+                            />
+                            {imageBase64 ? (
+                                <div className="relative w-full h-[160px] rounded-xl overflow-hidden border-2 border-green-300 shadow-sm">
+                                    <img src={imageBase64} alt="Preview" className="w-full h-full object-cover" />
+                                    <button
+                                        type="button"
+                                        onClick={() => { setImageBase64(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
+                                        className="absolute top-2 right-2 w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-transform"
+                                    >
+                                        <X size={16} />
+                                    </button>
+                                </div>
+                            ) : (
+                                <button
+                                    type="button"
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className="w-full h-[80px] rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 hover:bg-gray-100 active:bg-gray-200 flex flex-col items-center justify-center gap-1 transition-colors"
+                                >
+                                    <Camera size={24} className="text-gray-400" />
+                                    <span className="text-xs font-bold text-gray-500">{"\u0e41\u0e15\u0e30\u0e40\u0e1e\u0e37\u0e48\u0e2d\u0e16\u0e48\u0e32\u0e22\u0e23\u0e39\u0e1b/\u0e2d\u0e31\u0e1e\u0e42\u0e2b\u0e25\u0e14\u0e23\u0e39\u0e1b"}</span>
+                                </button>
+                            )}
                         </div>
 
                         {/* Action Button */}
                         <div className="pt-4 pb-8">
                             <button onClick={handleSaveDeal} className="w-full py-4 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-2xl font-bold text-lg shadow-lg shadow-green-200 active:scale-95 transition-transform flex items-center justify-center gap-2">
-                                <ListPlus size={20} /> โพสต์บอกต่อเพื่อนๆ
+                                <ListPlus size={20} /> บอกต่อ
                             </button>
                         </div>
 
@@ -513,7 +722,8 @@
                     return (
                         (deal.name && deal.name.toLowerCase().includes(q)) ||
                         (deal.brand && deal.brand.toLowerCase().includes(q)) ||
-                        (deal.category && deal.category.toLowerCase().includes(q))
+                        (deal.category && deal.category.toLowerCase().includes(q)) ||
+                        (deal.tags && deal.tags.some(t => t.toLowerCase().includes(q)))
                     );
                 });
 
@@ -667,6 +877,26 @@
                                                         <div className="font-bold text-gray-800 text-base">฿{deal.price} <span className="text-xs font-normal text-gray-500">({deal.unitQuantity} {deal.unitType})</span></div>
                                                         <div className="text-xs font-bold text-orange-500 mt-0.5">ตกชิ้นละ ฿{deal.ppu?.toFixed(2)}</div>
                                                         {deal.cashbackUsed && <div className="text-[10px] text-green-500 font-bold bg-green-50 px-1 py-0.5 rounded leading-none mt-1 inline-block">หักแคชแบ็กแล้ว</div>}
+
+                                                        {/* Shipping Fee */}
+                                                        <div className="text-[10px] text-gray-500 mt-1 font-medium">
+                                                            {deal.shippingType === 'excluded' && deal.shippingFee > 0 ? `+ ค่าส่ง ฿${deal.shippingFee}` : 'ส่งฟรี / รวมค่าส่งแล้ว'}
+                                                        </div>
+
+                                                        {/* Tags */}
+                                                        {deal.tags && deal.tags.length > 0 && (
+                                                            <div className="flex flex-wrap gap-1 mt-2">
+                                                                {deal.tags.map(tag => (
+                                                                    <span
+                                                                        key={tag}
+                                                                        onClick={(e) => { e.stopPropagation(); setSearchQuery(tag); setCurrentView('search'); }}
+                                                                        className="px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded text-[9px] cursor-pointer hover:bg-gray-200"
+                                                                    >
+                                                                        #{tag}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                     <div className="flex flex-col items-end mt-1">
                                                         <div className="flex items-center gap-1 text-xs text-gray-600 font-bold bg-gray-50 px-2 py-1 rounded border border-gray-100">
@@ -680,8 +910,8 @@
                                             <div className="border-t border-gray-50 pt-2 mt-1 flex items-center justify-between">
                                                 <span className="text-[10px] text-gray-400 font-medium bg-gray-100 px-2 py-0.5 rounded-full">{deal.category || 'General'}</span>
                                                 <div className="flex items-center gap-3 text-xs text-gray-400">
-                                                    <span className="flex items-center gap-1"><Heart size={14} /> {deal.likes}</span>
-                                                    <span className="flex items-center gap-1"><MessageSquare size={14} /> {deal.comments}</span>
+                                                    <span onClick={() => alert('กรุณาลงทะเบียนเข้าสู่ระบบเพื่อใช้งานฟังก์ชันนี้')} className="flex items-center gap-1 cursor-pointer hover:text-red-500 transition-colors"><Heart size={14} /> {deal.likes}</span>
+                                                    <span onClick={() => alert('กรุณาลงทะเบียนเข้าสู่ระบบเพื่อใช้งานฟังก์ชันนี้')} className="flex items-center gap-1 cursor-pointer hover:text-blue-500 transition-colors"><MessageSquare size={14} /> {deal.comments}</span>
                                                 </div>
                                             </div>
                                         </div>
@@ -713,14 +943,14 @@
                     <div className="w-full max-w-md bg-gray-100 shadow-2xl relative overflow-hidden flex flex-col h-[100dvh]">
 
                         {/* --- Header (Shared) --- */}
-                        <header className="bg-gradient-to-r from-orange-500 via-orange-600 to-red-500 text-white p-4 rounded-b-2xl shadow-md z-10 flex-none">
+                        <header className="bg-green-500 text-white p-4 rounded-b-2xl shadow-md z-10 flex-none">
                             <div className="flex justify-between items-center mb-3">
                                 <h1 className="text-2xl font-bold flex items-center gap-2">
                                     <Zap className="fill-current" /> DealHunter
                                 </h1>
-                                <div className="flex items-center gap-2 bg-black/20 px-3 py-1 rounded-full backdrop-blur-sm">
-                                    <Trophy size={16} className="text-yellow-300" />
-                                    <span className="text-sm font-medium">Rank: Searcher</span>
+                                <div onClick={() => alert('กรุณาลงทะเบียนเข้าสู่ระบบเพื่อใช้งานฟังก์ชันนี้')} className="flex items-center gap-2 bg-black/20 hover:bg-black/30 cursor-pointer transition-colors px-3 py-1 rounded-full backdrop-blur-sm">
+                                    <User size={16} className="text-white" />
+                                    <span className="text-sm font-medium">เข้าสู่ระบบ</span>
                                 </div>
                             </div>
 
