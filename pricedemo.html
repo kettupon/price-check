@@ -76,7 +76,6 @@
             }
         }
     </style>
-    <!-- React & Babel via CDN -->
     <script type="importmap">
       {
         "imports": {
@@ -100,7 +99,7 @@
         import {
             MapPin, Users, Tag, AlertCircle, Plus, Trophy, Heart, MessageSquare,
             Share2, Search, Zap, Home, ListPlus, Calculator, ChevronLeft, Image as ImageIcon,
-            Coffee, ShoppingCart, Store, Package, User, X, ShoppingBag, ImageOff, Camera
+            Coffee, ShoppingCart, Store, Package, User, X, ShoppingBag, ImageOff, Camera, FileText
         } from 'lucide-react';
         import { initializeApp } from 'firebase/app';
         import { getFirestore, collection, addDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
@@ -116,19 +115,22 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
-        // --- Live Firebase Data State Only ---
-
         function App() {
-            const [currentView, setCurrentView] = useState('feed'); // 'feed' | 'search' | 'add' | 'profile' | 'product_detail'
+            const [currentView, setCurrentView] = useState('feed'); // 'feed' | 'search' | 'add' | 'profile' | 'product_detail' | 'store_detail'
             const [activeTab, setActiveTab] = useState('ทั้งหมด');
             const [showShippingInFeed, setShowShippingInFeed] = useState(false);
-            const [profileTab, setProfileTab] = useState('posts'); // 'posts' | 'likes'
-            const [showDuplicatePrompt, setShowDuplicatePrompt] = useState(false);
+            const [profileTab, setProfileTab] = useState('posts');
+            const [showConfirmModal, setShowConfirmModal] = useState(false);
             const [deals, setDeals] = useState([]);
             const [groupedDeals, setGroupedDeals] = useState([]);
             const [searchQuery, setSearchQuery] = useState('');
             const [selectedProduct, setSelectedProduct] = useState(null);
-            const [zoomedImage, setZoomedImage] = useState(null); // Image URL for full screen zoom
+            const [zoomedImage, setZoomedImage] = useState(null);
+            const [stores, setStores] = useState([]);
+            const [selectedStore, setSelectedStore] = useState(null);
+            const [selectedStoreForDetail, setSelectedStoreForDetail] = useState(null); // For store_detail view
+            const [storeSearchQuery, setStoreSearchQuery] = useState('');
+            const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
 
             const ImagePlaceholder = () => (
                 <div className="w-full h-full flex flex-col items-center justify-center bg-gray-100/80 text-gray-400">
@@ -141,48 +143,47 @@
             useEffect(() => {
                 const q = query(collection(db, "items"), orderBy("lastUpdated", "desc"));
                 const unsubscribe = onSnapshot(q, (snapshot) => {
-                    const fbDeals = snapshot.docs.map(doc => {
-                        const data = doc.data();
+                    const fbDeals = snapshot.docs
+                        .filter(doc => doc.data().deleted !== true)
+                        .map(doc => {
+                            const data = doc.data();
+                            const numPrice = parseFloat(data.price) || 0;
+                            const numCashback = data.cashbackUsed ? (parseFloat(data.cashbackAmount) || 0) : 0;
+                            const totalPrice = Math.max(0, numPrice - numCashback);
+                            const unitQty = parseInt(data.unitQuantity) || 1;
+                            const ppu = totalPrice / unitQty;
+                            const shipFee = (data.shippingType === 'excluded') ? (parseFloat(data.shippingFee) || 0) : 0;
+                            const ppuWithShipping = (totalPrice + shipFee) / unitQty;
 
-                        // Calculate PPU properly from raw numeric data
-                        const numPrice = parseFloat(data.price) || 0;
-                        const numCashback = data.cashbackUsed ? (parseFloat(data.cashbackAmount) || 0) : 0;
-                        const totalPrice = Math.max(0, numPrice - numCashback);
-                        const unitQty = parseInt(data.unitQuantity) || 1;
-                        const ppu = totalPrice / unitQty;
-                        const shipFee = (data.shippingType === 'excluded') ? (parseFloat(data.shippingFee) || 0) : 0;
-                        const ppuWithShipping = (totalPrice + shipFee) / unitQty;
-
-                        return {
-                            id: doc.id,
-                            name: data.name,
-                            brand: data.brand || "",
-                            price: data.price, // Raw price
-                            ppu: ppu, // Price Per Unit
-                            ppuWithShipping: ppuWithShipping, // PPU including shipping
-                            totalPrice: totalPrice, // Price after cashback
-                            unitQuantity: unitQty,
-                            unitType: data.unitType || "ชิ้น",
-                            normalPrice: Math.round(data.price * 1.2), // Mock normal price based on 20% off
-                            shop: data.store || "ไม่ระบุร้าน",
-                            distance: "? km",
-                            type: data.category || "General",
-                            masterImage: data.masterImage || "",
-                            stickers: ppu < 10 ? ["🔥 คุ้มสุด!"] : [],
-                            likes: 0,
-                            comments: 0,
-                            image: data.image || "", // Empty if no image
-                            timePosted: new Date(data.lastUpdated).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }),
-                            reporter: "Live User",
-                            cashbackUsed: data.cashbackUsed || false,
-                            tags: data.tags || [],
-                            shippingType: data.shippingType || 'included',
-                            shippingFee: data.shippingFee || 0
-                        };
-                    });
+                            return {
+                                id: doc.id,
+                                name: data.name,
+                                brand: data.brand || "",
+                                price: data.price,
+                                ppu: ppu,
+                                ppuWithShipping: ppuWithShipping,
+                                totalPrice: totalPrice,
+                                unitQuantity: unitQty,
+                                unitType: data.unitType || "ชิ้น",
+                                normalPrice: Math.round(data.price * 1.2),
+                                shop: data.store || "ไม่ระบุร้าน",
+                                distance: "? km",
+                                masterImage: data.masterImage || "",
+                                stickers: ppu < 10 ? ["🔥 คุ้มสุด!"] : [],
+                                likes: 0,
+                                comments: 0,
+                                image: data.image || "",
+                                timePosted: new Date(data.lastUpdated).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }),
+                                reporter: "Live User",
+                                cashbackUsed: data.cashbackUsed || false,
+                                tags: data.tags || [],
+                                shippingType: data.shippingType || 'included',
+                                shippingFee: data.shippingFee || 0,
+                                description: data.description || ""
+                            };
+                        });
                     setDeals(fbDeals);
 
-                    // Create Grouped Deals for Feed/Search
                     const grouped = {};
                     fbDeals.forEach(deal => {
                         const name = deal.name || 'Unknown';
@@ -191,16 +192,16 @@
                                 id: deal.id,
                                 name: name,
                                 brand: deal.brand,
-                                category: deal.category,
                                 masterImage: deal.masterImage || deal.image,
                                 lowestPrice: deal.price,
-                                lowestPpu: deal.ppu, // Use PPU for Best Value
+                                lowestPpu: deal.ppu,
                                 lowestPpuWithShipping: deal.ppuWithShipping,
                                 lowestPpuUnit: deal.unitType,
                                 normalPrice: deal.normalPrice,
                                 postsCount: 1,
                                 stickers: deal.stickers,
-                                tags: [...deal.tags] // Keep track of unique tags per group
+                                tags: [...deal.tags],
+                                description: deal.description || ""
                             };
                         } else {
                             grouped[name].postsCount += 1;
@@ -209,6 +210,9 @@
                             grouped[name].lowestPpuWithShipping = Math.min(grouped[name].lowestPpuWithShipping, deal.ppuWithShipping);
                             if (deal.masterImage && (!grouped[name].masterImage || grouped[name].masterImage === grouped[name].image)) {
                                 grouped[name].masterImage = deal.masterImage;
+                            }
+                            if (deal.description && !grouped[name].description) {
+                                grouped[name].description = deal.description;
                             }
                             if (deal.tags && deal.tags.length > 0) {
                                 deal.tags.forEach(tag => {
@@ -221,31 +225,41 @@
                     });
                     setGroupedDeals(Object.values(grouped));
                 });
-                return () => unsubscribe();
+
+                const storesUnsubscribe = onSnapshot(collection(db, "stores"), (snapshot) => {
+                    const fbStores = snapshot.docs.map(doc => ({
+                        id: doc.id,
+                        ...doc.data()
+                    }));
+                    setStores(fbStores);
+                });
+
+                return () => {
+                    unsubscribe();
+                    storesUnsubscribe();
+                };
             }, []);
 
-            // --- State สำหรับหน้า Add Deal (Tracker Form) ---
+            // --- Add Deal Form State ---
             const [itemName, setItemName] = useState('');
             const [brand, setBrand] = useState('');
-            const [category, setCategory] = useState('Grocery');
             const [store, setStore] = useState('');
             const [price, setPrice] = useState('');
             const [unit, setUnit] = useState(1);
-            const [unitDisplay, setUnitDisplay] = useState('1'); // String used only for the input field
+            const [unitDisplay, setUnitDisplay] = useState('1');
             const [unitType, setUnitType] = useState('ชิ้น');
-            const [shippingType, setShippingType] = useState('included'); // 'included', 'excluded', null
+            const [shippingType, setShippingType] = useState('included');
             const [shippingFee, setShippingFee] = useState('');
             const [tags, setTags] = useState([]);
             const [tagInput, setTagInput] = useState('');
             const [usePromo, setUsePromo] = useState(false);
-            const [promoCode, setPromoCode] = useState(''); // New state for Promo Code text
+            const [promoCode, setPromoCode] = useState('');
             const [useCashback, setUseCashback] = useState(false);
             const [cashbackAmount, setCashbackAmount] = useState('');
-            const [includeShippingInPpu, setIncludeShippingInPpu] = useState(false); // Toggle to see real price with shipping
-            const [imageBase64, setImageBase64] = useState(null); // Photo capture
+            const [includeShippingInPpu, setIncludeShippingInPpu] = useState(false);
+            const [imageBase64, setImageBase64] = useState(null);
             const fileInputRef = useRef(null);
 
-            // Handle image capture / upload
             const handleImageCapture = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
@@ -269,7 +283,6 @@
                 reader.readAsDataURL(file);
             };
 
-            // คำนวณ PPU (Price Per Unit) Real-time
             const numPrice = parseFloat(price) || 0;
             const numCashback = useCashback ? (parseFloat(cashbackAmount) || 0) : 0;
             const addedShipping = (shippingType === 'excluded' && includeShippingInPpu) ? (parseFloat(shippingFee) || 0) : 0;
@@ -290,17 +303,19 @@
                 setTags(tags.filter(t => t !== tagToRemove));
             };
 
-            // --- Handlers ---
-            const handleSaveDeal = async () => {
+            const handleSaveDeal = () => {
                 if (!itemName || !price) {
                     alert('กรุณากรอกชื่อสินค้าและราคา');
                     return;
                 }
+                setShowConfirmModal(true);
+            };
+
+            const executeSaveDeal = async () => {
                 try {
                     await addDoc(collection(db, "items"), {
                         name: itemName,
                         brand: brand,
-                        category: category,
                         store: store,
                         price: parseFloat(price),
                         unitQuantity: parseInt(unit) || 1,
@@ -315,26 +330,62 @@
                         image: imageBase64 || '',
                         lastUpdated: Date.now()
                     });
-                    setShowDuplicatePrompt(true);
+
+                    setItemName(''); setBrand(''); setPrice(''); setUnit(1); setUnitDisplay('1'); setStore('');
+                    setUseCashback(false); setCashbackAmount(''); setUsePromo(false); setPromoCode('');
+                    setImageBase64(null); setTags([]); setTagInput(''); setShippingType('included');
+                    setShippingFee(''); setIncludeShippingInPpu(false);
+
+                    setShowConfirmModal(false);
+                    setCurrentView('feed');
                 } catch (e) {
                     console.error(e);
                     alert("Error saving: " + e.message);
                 }
             };
 
-            const handlePromptAction = () => {
-                setShowDuplicatePrompt(false);
-                setCurrentView('feed'); // กลับไปหน้าหลัก
-                // Reset Form
-                setItemName(''); setBrand(''); setPrice(''); setUnit(1); setUnitDisplay('1'); setStore(''); setUseCashback(false); setCashbackAmount('');
-                setUsePromo(false); setPromoCode(''); setImageBase64(null);
-                setTags([]); setTagInput(''); setShippingType('included'); setShippingFee(''); setIncludeShippingInPpu(false);
+            // --- Helper: get items for a specific store ---
+            const getStoreDeals = (storeId) => {
+                return deals.filter(d => d.shop === storeId);
             };
 
-            // --- Views Components ---
+            // --- Helper: compute best-ranked items for a store (compare PPU cross-store) ---
+            const getStoreBestRankedItems = (storeId) => {
+                const storeDeals = deals.filter(d => d.shop === storeId);
+
+                // For each item in this store, find the min PPU across ALL stores
+                // Then compute a "rank score" = how much cheaper vs global min PPU
+                const ranked = storeDeals.map(deal => {
+                    const allSameItem = deals.filter(d => d.name === deal.name);
+                    const globalMinPpu = Math.min(...allSameItem.map(d => d.ppu));
+                    const savingVsOthers = globalMinPpu > 0 ? ((deal.ppu - globalMinPpu) / globalMinPpu) : 0;
+                    // Lower savingVsOthers = better (0 means this IS the cheapest)
+                    return { ...deal, globalMinPpu, savingVsOthers, isCheapestGlobal: deal.ppu <= globalMinPpu };
+                });
+
+                // Sort: first those that are globally cheapest, then by PPU ascending
+                ranked.sort((a, b) => {
+                    if (a.isCheapestGlobal && !b.isCheapestGlobal) return -1;
+                    if (!a.isCheapestGlobal && b.isCheapestGlobal) return 1;
+                    return a.savingVsOthers - b.savingVsOthers;
+                });
+
+                // Deduplicate by name (keep best per product name)
+                const seen = new Set();
+                const deduped = [];
+                for (const d of ranked) {
+                    if (!seen.has(d.name)) {
+                        seen.add(d.name);
+                        deduped.push(d);
+                    }
+                }
+                return deduped.slice(0, 3);
+            };
+
+            // ===================== VIEWS =====================
+
             const renderProfile = () => (
                 <div className="flex-1 overflow-y-auto bg-gray-50 pb-24 animate-fade-in">
-                    {/* Profile Header */}
                     <div className="bg-white p-6 border-b border-gray-100 flex flex-col items-center">
                         <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center text-gray-300 text-4xl mb-3 border-4 border-white outline outline-gray-100">
                             <User size={40} />
@@ -343,8 +394,6 @@
                         <button onClick={() => alert('ฟังก์ชันเข้าสู่ระบบจะเปิดให้บริการเร็วๆนี้')} className="mt-3 px-6 py-2 bg-green-500 hover:bg-green-600 text-white text-sm font-bold rounded-full transition-colors">
                             เข้าสู่ระบบ / สมัครสมาชิก
                         </button>
-
-                        {/* Quick Stats Placeholder */}
                         <div className="flex gap-6 mt-6 w-full justify-center opacity-50">
                             <div className="text-center">
                                 <div className="text-2xl font-bold text-gray-800">0</div>
@@ -358,7 +407,6 @@
                         </div>
                     </div>
 
-                    {/* Profile Tabs */}
                     <div className="flex bg-white border-b border-gray-100 sticky top-0 z-10">
                         <button
                             onClick={() => setProfileTab('posts')}
@@ -374,7 +422,6 @@
                         </button>
                     </div>
 
-                    {/* Profile Feed List */}
                     <div className="p-4 space-y-3">
                         {deals.filter(d => profileTab === 'posts' ? d.reporter === 'Get_Hunter' : true).map((deal, idx) => (
                             <div key={deal.id + idx} className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex gap-3 relative overflow-hidden">
@@ -411,7 +458,6 @@
 
             const renderFeed = () => (
                 <div className="flex-1 overflow-y-auto p-3 bg-gray-100 pb-24 animate-fade-in">
-                    {/* Categories / Tabs */}
                     <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-3 mb-1">
                         <button
                             onClick={() => setShowShippingInFeed(v => !v)}
@@ -438,13 +484,12 @@
 
                     <div className="grid grid-cols-2 gap-3">
                         {groupedDeals.map(deal => (
-                            <div key={deal.id} onClick={() => { setSelectedProduct(deal); setCurrentView('product_detail'); }} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden flex flex-col hover:shadow-md transition-shadow cursor-pointer">
+                            <div key={deal.id} onClick={() => { setSelectedProduct(deal); setIsDescriptionExpanded(false); setCurrentView('product_detail'); }} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden flex flex-col hover:shadow-md transition-shadow cursor-pointer">
                                 <div className="relative aspect-square bg-gray-200 flex-shrink-0">
                                     {deal.masterImage ? <img src={deal.masterImage} alt={deal.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
                                     <div className="absolute top-1 left-1 flex flex-col gap-0.5">
                                         {deal.stickers && deal.stickers.map((sticker, idx) => (
-                                            <span key={idx} className={`px-1.5 py-0.5 text-[9px] font-bold rounded shadow-sm ${idx === 0 ? 'bg-red-500 text-white' : 'bg-green-500 text-white'
-                                                }`}>
+                                            <span key={idx} className={`px-1.5 py-0.5 text-[9px] font-bold rounded shadow-sm ${idx === 0 ? 'bg-red-500 text-white' : 'bg-green-500 text-white'}`}>
                                                 {sticker}
                                             </span>
                                         ))}
@@ -480,7 +525,6 @@
 
             const renderAddDeal = () => (
                 <div className="flex-1 flex flex-col bg-white overflow-hidden animate-fade-in relative z-0 pb-20">
-                    {/* DISPLAY ZONE (PPU Calculator) */}
                     <div className="flex-none bg-green-50/50 border-b border-green-100 p-6 flex flex-col justify-end items-end min-h-[160px] relative transition-all shadow-inner">
                         <div className="absolute top-4 left-4 flex gap-2">
                             {store && (
@@ -527,10 +571,7 @@
                         )}
                     </div>
 
-                    {/* INPUT ZONE */}
                     <div className="flex-1 overflow-y-auto p-4 space-y-6">
-
-                        {/* Name */}
                         <div className="space-y-2">
                             <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">ชื่อสินค้า</label>
                             <input
@@ -539,7 +580,6 @@
                             />
                         </div>
 
-                        {/* Brand */}
                         <div className="space-y-2">
                             <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">ยี่ห้อ (Optional)</label>
                             <input
@@ -548,8 +588,6 @@
                             />
                         </div>
 
-
-                        {/* Tags Input */}
                         <div className="space-y-2">
                             <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1 flex justify-between">
                                 <span>แท็ก (Tags) {tags.length}/5</span>
@@ -574,7 +612,6 @@
                             )}
                         </div>
 
-                        {/* Store Quick Select */}
                         <div className="space-y-2">
                             <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">เจอที่ร้านไหน?</label>
                             <input
@@ -593,7 +630,6 @@
                             </div>
                         </div>
 
-                        {/* Price & Quantity */}
                         <div className="grid grid-cols-2 gap-4">
                             <div className="col-span-2 space-y-2">
                                 <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">ราคา (฿)</label>
@@ -641,7 +677,6 @@
                             </div>
                         </div>
 
-                        {/* Promo Code Toggle */}
                         <div className="p-4 bg-blue-50/50 border border-blue-100 rounded-2xl space-y-3">
                             <label className="flex items-center gap-2 cursor-pointer">
                                 <input type="checkbox" checked={usePromo} onChange={(e) => setUsePromo(e.target.checked)} className="rounded text-blue-500 focus:ring-blue-500 w-4 h-4" />
@@ -655,7 +690,6 @@
                             )}
                         </div>
 
-                        {/* Cashback Toggle */}
                         <div className="p-4 bg-orange-50/50 border border-orange-100 rounded-2xl space-y-3">
                             <label className="flex items-center gap-2 cursor-pointer">
                                 <input type="checkbox" checked={useCashback} onChange={(e) => setUseCashback(e.target.checked)} className="rounded text-orange-500 focus:ring-orange-500 w-4 h-4" />
@@ -669,7 +703,6 @@
                             )}
                         </div>
 
-                        {/* Photo Upload */}
                         <div className="space-y-2">
                             <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">รูปภาพ</label>
                             <p className="text-[10px] text-gray-400 ml-1 -mt-1">สินค้าและป้ายราคา</p>
@@ -699,37 +732,32 @@
                                     className="w-full h-[80px] rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 hover:bg-gray-100 active:bg-gray-200 flex flex-col items-center justify-center gap-1 transition-colors"
                                 >
                                     <Camera size={24} className="text-gray-400" />
-                                    <span className="text-xs font-bold text-gray-500">{"\u0e41\u0e15\u0e30\u0e40\u0e1e\u0e37\u0e48\u0e2d\u0e16\u0e48\u0e32\u0e22\u0e23\u0e39\u0e1b/\u0e2d\u0e31\u0e1e\u0e42\u0e2b\u0e25\u0e14\u0e23\u0e39\u0e1b"}</span>
+                                    <span className="text-xs font-bold text-gray-500">แตะเพื่อถ่ายรูป/อัพโหลดรูป</span>
                                 </button>
                             )}
                         </div>
 
-                        {/* Action Button */}
                         <div className="pt-4 pb-8">
                             <button onClick={handleSaveDeal} className="w-full py-4 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-2xl font-bold text-lg shadow-lg shadow-green-200 active:scale-95 transition-transform flex items-center justify-center gap-2">
                                 <ListPlus size={20} /> บอกต่อ
                             </button>
                         </div>
-
                     </div>
                 </div>
             );
 
-            // --- Views Components: Search ---
             const renderSearch = () => {
                 const searchResults = groupedDeals.filter(deal => {
                     const q = searchQuery.toLowerCase();
                     return (
                         (deal.name && deal.name.toLowerCase().includes(q)) ||
                         (deal.brand && deal.brand.toLowerCase().includes(q)) ||
-                        (deal.category && deal.category.toLowerCase().includes(q)) ||
                         (deal.tags && deal.tags.some(t => t.toLowerCase().includes(q)))
                     );
                 });
 
                 return (
                     <div className="flex-1 flex flex-col bg-gray-100 overflow-hidden animate-fade-in relative z-0 pb-20">
-                        {/* Search Input Area */}
                         <div className="bg-white p-4 border-b border-gray-200 shadow-sm z-10">
                             <div className="relative">
                                 <input
@@ -748,7 +776,6 @@
                             </div>
                         </div>
 
-                        {/* Search Results Area */}
                         <div className="flex-1 overflow-y-auto p-3">
                             {searchQuery ? (
                                 <div>
@@ -756,7 +783,7 @@
                                     {searchResults.length > 0 ? (
                                         <div className="grid grid-cols-2 gap-3 pb-6">
                                             {searchResults.map(deal => (
-                                                <div key={deal.id} onClick={() => { setSelectedProduct(deal); setCurrentView('product_detail'); }} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden flex flex-col hover:shadow-md transition-shadow cursor-pointer">
+                                                <div key={deal.id} onClick={() => { setSelectedProduct(deal); setIsDescriptionExpanded(false); setCurrentView('product_detail'); }} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden flex flex-col hover:shadow-md transition-shadow cursor-pointer">
                                                     <div className="relative aspect-square bg-gray-200 flex-shrink-0">
                                                         {deal.masterImage ? <img src={deal.masterImage} alt={deal.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
                                                         <div className="absolute bottom-0 right-0 bg-white/90 backdrop-blur px-1.5 py-0.5 rounded-tl-lg font-bold text-orange-500 flex flex-col items-end shadow-sm">
@@ -789,7 +816,6 @@
                                     <Search size={40} className="mb-4 text-gray-300" />
                                     <h2 className="text-lg font-bold text-gray-600 mb-2">ค้นหาสินค้า</h2>
                                     <p className="text-xs text-center text-gray-500 mb-6 leading-relaxed">ค้นหาสินค้าราคาถูกที่สุด<br />จากหลากหลายร้านค้ารอบตัวคุณ</p>
-
                                     <div className="w-full bg-white rounded-xl p-4 shadow-sm border border-gray-100">
                                         <h3 className="text-xs font-bold text-gray-600 mb-3 text-left">หมวดหมู่ยอดฮิต</h3>
                                         <div className="flex flex-wrap gap-2">
@@ -807,18 +833,15 @@
                 );
             };
 
-            // --- Views Components: Product Detail ---
             const renderProductDetail = () => {
                 if (!selectedProduct) return null;
 
-                // Find all deals with same name, sort by PPU ascending
                 const productDeals = deals
                     .filter(d => d.name === selectedProduct.name)
                     .sort((a, b) => a.ppu - b.ppu);
 
                 return (
                     <div className="flex-1 flex flex-col bg-gray-100 overflow-hidden animate-fade-in relative z-0 pb-20">
-                        {/* Header */}
                         <div className="bg-white p-4 border-b border-gray-200 shadow-sm z-10 sticky top-0 flex items-center gap-3">
                             <button onClick={() => setCurrentView('feed')} className="p-2 -ml-2 text-gray-400 hover:text-gray-600">
                                 <ChevronLeft size={24} />
@@ -827,44 +850,56 @@
                         </div>
 
                         <div className="flex-1 overflow-y-auto pb-24">
-                            {/* Product Image & Info */}
-                            <div className="bg-white p-4 mb-2 flex gap-4 shadow-sm">
-                                <div className="w-24 h-24 rounded-xl border border-gray-100 flex-shrink-0 overflow-hidden bg-gray-50">
-                                    {selectedProduct.masterImage ? <img src={selectedProduct.masterImage} alt={selectedProduct.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
-                                </div>
-                                <div className="flex-1 flex flex-col">
-                                    <h3 className="font-bold text-gray-800 text-sm leading-tight mb-1">{selectedProduct.name}</h3>
-                                    {selectedProduct.brand && <div className="text-xs text-gray-500 mb-2 font-medium">ยี่ห้อ: {selectedProduct.brand}</div>}
-
-                                    {/* Admin Description */}
-                                    {selectedProduct.description && (
-                                        <div className="text-xs text-gray-600 mb-2 bg-gray-50 p-2 rounded-lg border border-gray-100">
-                                            <span className="font-bold text-gray-700 block mb-0.5">รายละเอียดสินค้า:</span>
-                                            {selectedProduct.description}
+                            <div className="bg-white p-4 mb-2 shadow-sm">
+                                <div className="flex gap-4 mb-2">
+                                    <div className="w-1/2 rounded-2xl border border-gray-100 flex-shrink-0 overflow-hidden bg-gray-50 aspect-square shadow-sm">
+                                        {selectedProduct.masterImage ? <img src={selectedProduct.masterImage} alt={selectedProduct.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
+                                    </div>
+                                    <div className="flex-1 flex flex-col justify-between py-1">
+                                        <div>
+                                            <h3 className="font-bold text-gray-800 text-base leading-tight mb-1.5">{selectedProduct.name}</h3>
+                                            {selectedProduct.brand && <div className="text-xs text-gray-500 bg-gray-50 px-2 py-1 rounded-md border border-gray-100 font-bold inline-block">ยี่ห้อ: {selectedProduct.brand}</div>}
                                         </div>
-                                    )}
-
-                                    <div className="mt-auto">
-                                        <div className="text-xs text-orange-600 font-bold bg-orange-50 px-2 py-1 rounded inline-block">
-                                            เริ่มคุ้มสุดที่ ฿{productDeals[0]?.ppu?.toFixed(2)} ต่อ {productDeals[0]?.unitType}
+                                        <div className="mt-auto">
+                                            <div className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">คุ้มที่สุดตอนนี้</div>
+                                            <div className="text-xs text-orange-600 font-bold bg-orange-50 px-2 py-1.5 rounded-lg border border-orange-100 inline-block shadow-sm">
+                                                ฿{productDeals[0]?.ppu?.toFixed(2)} / {productDeals[0]?.unitType}
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
+
+                                {selectedProduct.description && (
+                                    <div className="text-xs text-gray-600 mt-4 p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                                        <div className="flex items-center gap-1.5 text-gray-400 mb-2 uppercase tracking-widest text-[9px] font-bold">
+                                            <FileText size={12} /> ข้อมูลและรายละเอียด
+                                        </div>
+                                        <div className={`leading-relaxed font-medium ${!isDescriptionExpanded ? 'line-clamp-1' : ''}`}>
+                                            {selectedProduct.description}
+                                            {isDescriptionExpanded && <span className="block mt-2 text-[10px] text-gray-400 italic">Admin</span>}
+                                        </div>
+                                        {selectedProduct.description.length > 50 && (
+                                            <button
+                                                onClick={() => setIsDescriptionExpanded(!isDescriptionExpanded)}
+                                                className="mt-2 text-blue-500 font-bold hover:underline py-1"
+                                            >
+                                                {isDescriptionExpanded ? 'แสดงน้อยลง' : 'อ่านต่อ'}
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
                             </div>
 
-                            {/* Report List */}
                             <div className="px-4 py-3">
                                 <h3 className="text-xs font-bold text-gray-500 mb-3 uppercase tracking-wider">โพสต์และราคาจากผู้ใช้ ({productDeals.length})</h3>
                                 <div className="space-y-3">
                                     {productDeals.map(deal => (
                                         <div key={deal.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col gap-2 relative overflow-hidden">
-                                            {/* Medal for cheapest */}
                                             {deal.id === productDeals[0].id && (
                                                 <div className="absolute top-0 right-0 bg-yellow-400 text-white text-[9px] font-bold px-2 py-0.5 rounded-bl-lg shadow-sm">ถูกที่สุด!</div>
                                             )}
 
                                             <div className="flex items-start gap-3">
-                                                {/* Original User Store Uploaded Image - Clickable */}
                                                 <div
                                                     className="w-16 h-16 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden border border-gray-200 cursor-pointer hover:opacity-80 transition-opacity"
                                                     onClick={() => { if (deal.image) setZoomedImage(deal.image) }}
@@ -877,13 +912,9 @@
                                                         <div className="font-bold text-gray-800 text-base">฿{deal.price} <span className="text-xs font-normal text-gray-500">({deal.unitQuantity} {deal.unitType})</span></div>
                                                         <div className="text-xs font-bold text-orange-500 mt-0.5">ตกชิ้นละ ฿{deal.ppu?.toFixed(2)}</div>
                                                         {deal.cashbackUsed && <div className="text-[10px] text-green-500 font-bold bg-green-50 px-1 py-0.5 rounded leading-none mt-1 inline-block">หักแคชแบ็กแล้ว</div>}
-
-                                                        {/* Shipping Fee */}
                                                         <div className="text-[10px] text-gray-500 mt-1 font-medium">
                                                             {deal.shippingType === 'excluded' && deal.shippingFee > 0 ? `+ ค่าส่ง ฿${deal.shippingFee}` : 'ส่งฟรี / รวมค่าส่งแล้ว'}
                                                         </div>
-
-                                                        {/* Tags */}
                                                         {deal.tags && deal.tags.length > 0 && (
                                                             <div className="flex flex-wrap gap-1 mt-2">
                                                                 {deal.tags.map(tag => (
@@ -899,16 +930,32 @@
                                                         )}
                                                     </div>
                                                     <div className="flex flex-col items-end mt-1">
-                                                        <div className="flex items-center gap-1 text-xs text-gray-600 font-bold bg-gray-50 px-2 py-1 rounded border border-gray-100">
+                                                        <div
+                                                            className={`flex items-center gap-1 text-xs font-bold px-2 py-1 rounded border transition-all ${(() => {
+                                                                const storeMeta = stores.find(s => s.id === deal.shop);
+                                                                return (!storeMeta || storeMeta.isVisible !== false) && deal.shop !== 'ไม่ระบุร้าน'
+                                                                    ? 'bg-blue-50 text-blue-600 border-blue-100 cursor-pointer hover:bg-blue-100 active:scale-95'
+                                                                    : 'bg-gray-50 text-gray-600 border-gray-100';
+                                                            })()}`}
+                                                            onClick={() => {
+                                                                const storeMeta = stores.find(s => s.id === deal.shop);
+                                                                if ((!storeMeta || storeMeta.isVisible !== false) && deal.shop !== 'ไม่ระบุร้าน') {
+                                                                    setSelectedStore(storeMeta || { id: deal.shop, province: '', phone: '', mapsUrl: '', isFamous: false, isVisible: true });
+                                                                }
+                                                            }}
+                                                        >
                                                             <Store size={12} className="text-gray-400" /> {deal.shop}
+                                                            {(() => {
+                                                                const storeMeta = stores.find(s => s.id === deal.shop);
+                                                                return storeMeta && storeMeta.isFamous && <span className="ml-1 text-[8px] bg-orange-500 text-white px-1 rounded-sm">★</span>;
+                                                            })()}
                                                         </div>
                                                         <div className="text-[10px] text-gray-400 mt-2">{deal.timePosted} โดย {deal.reporter}</div>
                                                     </div>
                                                 </div>
                                             </div>
 
-                                            <div className="border-t border-gray-50 pt-2 mt-1 flex items-center justify-between">
-                                                <span className="text-[10px] text-gray-400 font-medium bg-gray-100 px-2 py-0.5 rounded-full">{deal.category || 'General'}</span>
+                                            <div className="border-t border-gray-50 pt-2 mt-1 flex items-center justify-end">
                                                 <div className="flex items-center gap-3 text-xs text-gray-400">
                                                     <span onClick={() => alert('กรุณาลงทะเบียนเข้าสู่ระบบเพื่อใช้งานฟังก์ชันนี้')} className="flex items-center gap-1 cursor-pointer hover:text-red-500 transition-colors"><Heart size={14} /> {deal.likes}</span>
                                                     <span onClick={() => alert('กรุณาลงทะเบียนเข้าสู่ระบบเพื่อใช้งานฟังก์ชันนี้')} className="flex items-center gap-1 cursor-pointer hover:text-blue-500 transition-colors"><MessageSquare size={14} /> {deal.comments}</span>
@@ -920,13 +967,11 @@
                             </div>
                         </div>
 
-                        {/* Fixed Add Price Button */}
                         <div className="fixed bottom-[85px] inset-x-0 px-4 max-w-md mx-auto z-20">
                             <button
                                 onClick={() => {
                                     setItemName(selectedProduct.name);
                                     setBrand(selectedProduct.brand || '');
-                                    setCategory(selectedProduct.category || 'Grocery');
                                     setCurrentView('add');
                                 }}
                                 className="w-full bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 transform active:scale-95 transition-transform"
@@ -938,43 +983,271 @@
                 );
             };
 
+            // ===================== STORE DETAIL VIEW =====================
+            const renderStoreDetail = () => {
+                if (!selectedStoreForDetail) return null;
+
+                const storeId = selectedStoreForDetail.id;
+                const storeDeals = getStoreDeals(storeId);
+                const top3 = getStoreBestRankedItems(storeId);
+
+                // Filter store items by search
+                const filteredStoreDeals = storeSearchQuery
+                    ? storeDeals.filter(d =>
+                        d.name.toLowerCase().includes(storeSearchQuery.toLowerCase()) ||
+                        (d.brand && d.brand.toLowerCase().includes(storeSearchQuery.toLowerCase())) ||
+                        (d.tags && d.tags.some(t => t.toLowerCase().includes(storeSearchQuery.toLowerCase())))
+                    )
+                    : storeDeals;
+
+                // Deduplicate by name for the full list
+                const seenNames = new Set();
+                const uniqueFilteredDeals = [];
+                for (const d of filteredStoreDeals) {
+                    if (!seenNames.has(d.name)) {
+                        seenNames.add(d.name);
+                        uniqueFilteredDeals.push(d);
+                    }
+                }
+
+                const medalColors = ['bg-yellow-400', 'bg-gray-300', 'bg-amber-600'];
+                const medalEmojis = ['🥇', '🥈', '🥉'];
+
+                return (
+                    <div className="flex-1 flex flex-col bg-gray-100 overflow-hidden animate-fade-in relative z-0 pb-20">
+                        {/* Header */}
+                        <div className="bg-white border-b border-gray-200 shadow-sm z-10 sticky top-0">
+                            <div className="p-4 flex items-center gap-3">
+                                <button
+                                    onClick={() => { setCurrentView('feed'); setSelectedStoreForDetail(null); setStoreSearchQuery(''); }}
+                                    className="p-2 -ml-2 text-gray-400 hover:text-gray-600"
+                                >
+                                    <ChevronLeft size={24} />
+                                </button>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <h2 className="text-lg font-bold text-gray-800 truncate">{storeId}</h2>
+                                        {selectedStoreForDetail.isFamous && (
+                                            <span className="text-[9px] bg-orange-500 text-white px-2 py-0.5 rounded-full font-bold flex-shrink-0">★ ยอดนิยม</span>
+                                        )}
+                                    </div>
+                                    {selectedStoreForDetail.province && (
+                                        <div className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
+                                            <MapPin size={10} /> {selectedStoreForDetail.province}
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex-shrink-0 text-right">
+                                    <div className="text-lg font-bold text-gray-800">{storeDeals.length}</div>
+                                    <div className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">รายการ</div>
+                                </div>
+                            </div>
+
+                            {/* Search within store */}
+                            <div className="px-4 pb-3">
+                                <div className="relative">
+                                    <input
+                                        type="text"
+                                        placeholder={`ค้นหาสินค้าใน ${storeId}...`}
+                                        value={storeSearchQuery}
+                                        onChange={(e) => setStoreSearchQuery(e.target.value)}
+                                        className="w-full py-2.5 pl-9 pr-4 bg-gray-50 rounded-xl text-sm font-medium text-gray-800 focus:outline-none border-2 border-transparent focus:border-orange-500 transition-colors"
+                                    />
+                                    <Search className="absolute left-3 top-3 text-gray-400" size={15} />
+                                    {storeSearchQuery && (
+                                        <button onClick={() => setStoreSearchQuery('')} className="absolute right-3 top-3 text-gray-400">
+                                            <X size={15} />
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto">
+                            {/* TOP 3 BEST VALUE SECTION — only shown when not searching */}
+                            {!storeSearchQuery && top3.length > 0 && (
+                                <div className="p-4 pb-2">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <Trophy size={16} className="text-yellow-500" />
+                                        <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider">สินค้าคุ้มค่าที่สุดของร้านนี้</h3>
+                                    </div>
+                                    <p className="text-[10px] text-gray-400 mb-3 -mt-1">เปรียบเทียบกับร้านอื่นๆ ในระบบ</p>
+
+                                    {/* Rank 1 — full width */}
+                                    {top3[0] && (
+                                        <div
+                                            onClick={() => {
+                                                const gd = groupedDeals.find(g => g.name === top3[0].name);
+                                                if (gd) { setSelectedProduct(gd); setIsDescriptionExpanded(false); setCurrentView('product_detail'); }
+                                            }}
+                                            className="bg-white rounded-2xl shadow-sm border border-yellow-200 overflow-hidden mb-3 cursor-pointer hover:shadow-md transition-shadow relative"
+                                        >
+                                            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-yellow-400 to-orange-400 rounded-t-2xl"></div>
+                                            <div className="flex gap-3 p-3 pt-4">
+                                                <div className="relative w-20 h-20 bg-gray-100 rounded-xl overflow-hidden flex-shrink-0 border border-gray-100 shadow-sm">
+                                                    {top3[0].image || top3[0].masterImage
+                                                        ? <img src={top3[0].image || top3[0].masterImage} alt={top3[0].name} className="w-full h-full object-cover" />
+                                                        : <ImagePlaceholder />
+                                                    }
+                                                    <div className="absolute top-0 left-0 w-6 h-6 bg-yellow-400 rounded-br-xl flex items-center justify-center text-[11px] font-bold text-white shadow-sm">
+                                                        1
+                                                    </div>
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-start justify-between gap-2">
+                                                        <h4 className="font-bold text-gray-800 text-sm leading-tight line-clamp-2 flex-1">{top3[0].name}</h4>
+                                                        <span className="text-lg flex-shrink-0">{medalEmojis[0]}</span>
+                                                    </div>
+                                                    <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                                                        <span className="text-sm font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-lg border border-orange-100">
+                                                            ฿{top3[0].ppu?.toFixed(2)}/{top3[0].unitType}
+                                                        </span>
+                                                        {top3[0].isCheapestGlobal && (
+                                                            <span className="text-[9px] font-bold bg-green-500 text-white px-1.5 py-0.5 rounded-full">
+                                                                ถูกที่สุดในระบบ!
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <div className="text-[10px] text-gray-400 mt-1.5 font-medium">
+                                                        ฿{top3[0].price} · {top3[0].unitQuantity} {top3[0].unitType}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Rank 2 & 3 — side by side */}
+                                    {top3.length > 1 && (
+                                        <div className="grid grid-cols-2 gap-3 mb-3">
+                                            {top3.slice(1, 3).map((deal, idx) => (
+                                                <div
+                                                    key={deal.id}
+                                                    onClick={() => {
+                                                        const gd = groupedDeals.find(g => g.name === deal.name);
+                                                        if (gd) { setSelectedProduct(gd); setIsDescriptionExpanded(false); setCurrentView('product_detail'); }
+                                                    }}
+                                                    className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md transition-shadow relative"
+                                                >
+                                                    <div className={`h-0.5 ${idx === 0 ? 'bg-gray-300' : 'bg-amber-500'} w-full`}></div>
+                                                    <div className="p-2.5">
+                                                        <div className="relative aspect-square bg-gray-100 rounded-lg overflow-hidden mb-2 border border-gray-100">
+                                                            {deal.image || deal.masterImage
+                                                                ? <img src={deal.image || deal.masterImage} alt={deal.name} className="w-full h-full object-cover" />
+                                                                : <ImagePlaceholder />
+                                                            }
+                                                            <div className={`absolute top-0 left-0 w-5 h-5 ${medalColors[idx + 1]} rounded-br-lg flex items-center justify-center text-[10px] font-bold text-white shadow-sm`}>
+                                                                {idx + 2}
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-start justify-between gap-1">
+                                                            <h4 className="font-bold text-gray-800 text-[10px] leading-tight line-clamp-2 flex-1">{deal.name}</h4>
+                                                            <span className="text-sm flex-shrink-0">{medalEmojis[idx + 1]}</span>
+                                                        </div>
+                                                        <div className="mt-1">
+                                                            <span className="text-xs font-bold text-orange-600">฿{deal.ppu?.toFixed(2)}</span>
+                                                            <span className="text-[9px] text-gray-400">/{deal.unitType}</span>
+                                                        </div>
+                                                        {deal.isCheapestGlobal && (
+                                                            <span className="text-[8px] font-bold bg-green-500 text-white px-1 py-0.5 rounded-full mt-1 inline-block">
+                                                                ถูกที่สุด!
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* ALL ITEMS LIST */}
+                            <div className="px-4 pb-24">
+                                <div className="flex items-center justify-between mb-3">
+                                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                                        {storeSearchQuery ? `ผลการค้นหา (${uniqueFilteredDeals.length})` : `สินค้าทั้งหมด (${uniqueFilteredDeals.length})`}
+                                    </h3>
+                                </div>
+
+                                {uniqueFilteredDeals.length === 0 ? (
+                                    <div className="text-center py-10 flex flex-col items-center">
+                                        <AlertCircle size={36} className="text-gray-300 mb-3" />
+                                        <div className="text-gray-500 text-sm font-medium">ไม่พบสินค้า</div>
+                                        <div className="text-gray-400 text-xs mt-1">ลองเปลี่ยนคำค้นหา</div>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {uniqueFilteredDeals.map(deal => (
+                                            <div
+                                                key={deal.id}
+                                                onClick={() => {
+                                                    const gd = groupedDeals.find(g => g.name === deal.name);
+                                                    if (gd) { setSelectedProduct(gd); setIsDescriptionExpanded(false); setCurrentView('product_detail'); }
+                                                }}
+                                                className="bg-white p-3 rounded-xl shadow-sm border border-gray-200 flex gap-3 cursor-pointer hover:shadow-md transition-shadow"
+                                            >
+                                                <div className="w-14 h-14 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden border border-gray-100">
+                                                    {deal.image || deal.masterImage
+                                                        ? <img src={deal.image || deal.masterImage} alt={deal.name} className="w-full h-full object-cover" />
+                                                        : <ImagePlaceholder />
+                                                    }
+                                                </div>
+                                                <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
+                                                    <h4 className="font-bold text-gray-800 text-xs leading-tight line-clamp-2">{deal.name}</h4>
+                                                    <div className="flex items-center justify-between mt-1">
+                                                        <div>
+                                                            <span className="text-sm font-bold text-gray-800">฿{deal.price}</span>
+                                                            <span className="text-[10px] text-gray-400 ml-1">({deal.unitQuantity} {deal.unitType})</span>
+                                                        </div>
+                                                        <span className="text-[10px] font-bold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded-md border border-orange-100">
+                                                            ฿{deal.ppu?.toFixed(2)}/{deal.unitType}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
             return (
                 <div className="min-h-screen bg-gray-900 flex justify-center font-sans">
                     <div className="w-full max-w-md bg-gray-100 shadow-2xl relative overflow-hidden flex flex-col h-[100dvh]">
 
-                        {/* --- Header (Shared) --- */}
-                        <header className="bg-green-500 text-white p-4 rounded-b-2xl shadow-md z-10 flex-none">
-                            <div className="flex justify-between items-center mb-3">
-                                <h1 className="text-2xl font-bold flex items-center gap-2">
-                                    <Zap className="fill-current" /> DealHunter
-                                </h1>
-                                <div onClick={() => alert('กรุณาลงทะเบียนเข้าสู่ระบบเพื่อใช้งานฟังก์ชันนี้')} className="flex items-center gap-2 bg-black/20 hover:bg-black/30 cursor-pointer transition-colors px-3 py-1 rounded-full backdrop-blur-sm">
-                                    <User size={16} className="text-white" />
-                                    <span className="text-sm font-medium">เข้าสู่ระบบ</span>
+                        {/* Header — hidden on store_detail (it has its own) */}
+                        {currentView !== 'store_detail' && (
+                            <header className="bg-green-500 text-white p-4 rounded-b-2xl shadow-md z-10 flex-none">
+                                <div className="flex justify-between items-center mb-3">
+                                    <h1 className="text-2xl font-bold flex items-center gap-2">
+                                        <Zap className="fill-current" /> DealHunter
+                                    </h1>
+                                    <div onClick={() => alert('กรุณาลงทะเบียนเข้าสู่ระบบเพื่อใช้งานฟังก์ชันนี้')} className="flex items-center gap-2 bg-black/20 hover:bg-black/30 cursor-pointer transition-colors px-3 py-1 rounded-full backdrop-blur-sm">
+                                        <User size={16} className="text-white" />
+                                        <span className="text-sm font-medium">เข้าสู่ระบบ</span>
+                                    </div>
                                 </div>
-                            </div>
-
-                            <div className="text-sm font-medium text-white/80 animate-fade-in flex items-center gap-1">
-                                {currentView === 'feed' && <><Home size={16} /> หน้าแรก</>}
-                                {currentView === 'search' && <><Search size={16} /> ค้นหา</>}
-                                {currentView === 'add' && <><Calculator size={16} /> เครื่องมือเช็คราคาและบอกต่อ</>}
-                                {currentView === 'profile' && <><User size={16} /> โปรไฟล์ส่วนตัว</>}
-                            </div>
-                            {currentView === 'profile' && (
                                 <div className="text-sm font-medium text-white/80 animate-fade-in flex items-center gap-1">
-                                    <User size={16} /> โปรไฟล์ส่วนตัว
+                                    {currentView === 'feed' && <><Home size={16} /> หน้าแรก</>}
+                                    {currentView === 'search' && <><Search size={16} /> ค้นหา</>}
+                                    {currentView === 'add' && <><Calculator size={16} /> เครื่องมือเช็คราคาและบอกต่อ</>}
+                                    {currentView === 'profile' && <><User size={16} /> โปรไฟล์ส่วนตัว</>}
+                                    {currentView === 'product_detail' && <><Package size={16} /> รายละเอียดสินค้า</>}
                                 </div>
-                            )}
-                        </header>
+                            </header>
+                        )}
 
-                        {/* --- MAIN CONTENT AREA --- */}
+                        {/* Main Content */}
                         {currentView === 'feed' && renderFeed()}
                         {currentView === 'search' && renderSearch()}
                         {currentView === 'add' && renderAddDeal()}
                         {currentView === 'profile' && renderProfile()}
                         {currentView === 'product_detail' && renderProductDetail()}
+                        {currentView === 'store_detail' && renderStoreDetail()}
 
-                        {/* --- FAB (Only in Feed View) --- */}
+                        {/* FAB */}
                         {currentView === 'feed' && (
                             <button
                                 onClick={() => setCurrentView('add')}
@@ -984,74 +1257,172 @@
                             </button>
                         )}
 
-                        {/* --- Bottom Navigation --- */}
-                        <nav className="absolute bottom-0 w-full bg-white border-t border-gray-200 flex justify-around py-3 pb-safe z-30 text-xs text-gray-500 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
-                            <button
-                                onClick={() => setCurrentView('feed')}
-                                className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'feed' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}
-                            >
-                                <Home size={20} className={currentView === 'feed' ? 'fill-current' : ''} /> หน้าแรก
-                            </button>
-                            <button
-                                onClick={() => setCurrentView('search')}
-                                className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'search' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}
-                            >
-                                <Search size={20} className={currentView === 'search' ? 'border-b-2 border-orange-500 pb-0.5' : ''} /> ค้นหา
-                            </button>
-                            <button
-                                onClick={() => setCurrentView('add')}
-                                className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'add' ? 'text-green-500 font-bold' : 'hover:text-green-400'}`}
-                            >
-                                <ListPlus size={20} /> บอกต่อ
-                            </button>
-                            <button
-                                onClick={() => setCurrentView('profile')}
-                                className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'profile' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}
-                            >
-                                <User size={20} className={currentView === 'profile' ? 'fill-current' : ''} /> โปรไฟล์
-                            </button>
-                        </nav>
+                        {/* Bottom Nav — hidden on store_detail */}
+                        {currentView !== 'store_detail' && (
+                            <nav className="absolute bottom-0 w-full bg-white border-t border-gray-200 flex justify-around py-3 pb-safe z-30 text-xs text-gray-500 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
+                                <button onClick={() => setCurrentView('feed')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'feed' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}>
+                                    <Home size={20} className={currentView === 'feed' ? 'fill-current' : ''} /> หน้าแรก
+                                </button>
+                                <button onClick={() => setCurrentView('search')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'search' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}>
+                                    <Search size={20} /> ค้นหา
+                                </button>
+                                <button onClick={() => setCurrentView('add')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'add' ? 'text-green-500 font-bold' : 'hover:text-green-400'}`}>
+                                    <ListPlus size={20} /> บอกต่อ
+                                </button>
+                                <button onClick={() => setCurrentView('profile')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'profile' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}>
+                                    <User size={20} className={currentView === 'profile' ? 'fill-current' : ''} /> โปรไฟล์
+                                </button>
+                            </nav>
+                        )}
 
-                        {/* --- DUPLICATE DETECTION MODAL --- */}
-                        {showDuplicatePrompt && (
-                            <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
-                                <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl">
-                                    <div className="bg-red-50 p-4 border-b border-red-100 flex items-start gap-3">
-                                        <AlertCircle className="text-red-500 flex-shrink-0 mt-1" />
-                                        <div>
-                                            <h3 className="font-bold text-gray-800">พบสินค้าในระบบแล้ว!</h3>
-                                            <p className="text-sm text-gray-600 mt-1">
-                                                มีคนรายงานราคา <span className="font-semibold text-orange-600">{itemName || 'สินค้านี้'}</span> ที่ <span className="font-semibold text-orange-600">{store || 'ร้านนี้'}</span> ไว้เมื่อ 2 ชม. ที่แล้ว
-                                            </p>
+                        {/* POST CONFIRMATION MODAL */}
+                        {showConfirmModal && (
+                            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-6 animate-fade-in" onClick={() => setShowConfirmModal(false)}>
+                                <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl relative" onClick={e => e.stopPropagation()}>
+                                    <button onClick={() => setShowConfirmModal(false)} className="absolute top-4 right-4 w-8 h-8 bg-gray-100 text-gray-400 rounded-full flex items-center justify-center hover:bg-gray-200 transition-colors z-10">
+                                        <X size={20} />
+                                    </button>
+                                    <div className="p-8 pb-4 flex flex-col items-center border-b border-gray-50 bg-green-50/50">
+                                        <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center text-green-500 mb-4 shadow-sm border border-green-100">
+                                            <ListPlus size={40} />
                                         </div>
+                                        <h2 className="text-xl font-bold text-gray-800 text-center uppercase tracking-tight">ยืนยันข้อมูลบอกต่อ</h2>
+                                        <p className="text-xs text-gray-500 mt-1 font-medium italic">ตรวจสอบความถูกต้องก่อนบันทึก</p>
                                     </div>
-                                    <div className="p-4 space-y-3">
-                                        <p className="text-sm text-gray-700 font-medium text-center mb-2">
-                                            คุณต้องการทำอะไรกับข้อมูลนี้?
-                                        </p>
-                                        <button onClick={handlePromptAction} className="w-full bg-green-500 hover:bg-green-600 text-white py-3 rounded-xl font-medium transition-colors flex justify-center items-center gap-2 shadow-md">
-                                            <Tag size={18} /> ยืนยันว่าราคานี้จริง! (+10 Pts)
+                                    <div className="p-6 space-y-4">
+                                        <div className="flex gap-4 items-center mb-2">
+                                            <div className="w-16 h-16 rounded-xl border border-gray-100 flex-shrink-0 overflow-hidden bg-gray-50 shadow-sm">
+                                                {imageBase64 ? <img src={imageBase64} alt="Preview" className="w-full h-full object-cover" /> : <ImagePlaceholder />}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">สินค้า</div>
+                                                <div className="text-sm font-bold text-gray-800 truncate">{itemName}</div>
+                                                {brand && <div className="text-[10px] text-gray-500 font-bold">ยี่ห้อ: {brand}</div>}
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="p-3 bg-gray-50 rounded-2xl border border-gray-100">
+                                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1 text-center">ราคา {unit} {unitType}</div>
+                                                <div className="text-lg font-bold text-gray-800 text-center">฿{numPrice}</div>
+                                            </div>
+                                            <div className="p-3 bg-orange-50 rounded-2xl border border-orange-100">
+                                                <div className="text-[10px] font-bold text-orange-400 uppercase tracking-widest mb-1 text-center">คุ้มสุดที่ (PPU)</div>
+                                                <div className="text-lg font-bold text-orange-600 text-center">฿{ppu.toFixed(2)}</div>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-2xl border border-gray-100">
+                                            <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-orange-400 border border-gray-100">
+                                                <Store size={20} />
+                                            </div>
+                                            <div>
+                                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">สถานที่ / ร้านค้า</div>
+                                                <div className="text-sm font-bold text-gray-700">{store || 'ไม่ระบุร้าน'}</div>
+                                            </div>
+                                        </div>
+                                        <button onClick={executeSaveDeal} className="w-full py-4 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-2xl font-bold text-lg shadow-lg shadow-green-200 active:scale-95 transition-all mt-2 flex items-center justify-center gap-2">
+                                            <ListPlus size={20} /> ยืนยันบอกต่อ!
                                         </button>
-                                        <div className="flex gap-2">
-                                            <button onClick={handlePromptAction} className="flex-1 bg-orange-50 hover:bg-orange-100 text-orange-600 py-2 rounded-xl text-sm font-medium transition-colors border border-orange-100">
-                                                คนละสาขากัน
-                                            </button>
-                                            <button onClick={handlePromptAction} className="flex-1 bg-red-50 hover:bg-red-100 text-red-600 py-2 rounded-xl text-sm font-medium transition-colors border border-red-100">
-                                                อัปเดตราคาใหม่!
-                                            </button>
-                                        </div>
                                     </div>
+                                    <div className="h-4"></div>
                                 </div>
                             </div>
                         )}
 
-                        {/* --- IMAGE ZOOM MODAL --- */}
+                        {/* IMAGE ZOOM MODAL */}
                         {zoomedImage && (
                             <div className="absolute inset-0 bg-black/90 z-50 flex items-center justify-center backdrop-blur-sm animate-fade-in" onClick={() => setZoomedImage(null)}>
                                 <button className="absolute top-6 right-6 text-white/50 hover:text-white bg-black/30 w-10 h-10 rounded-full flex items-center justify-center transition-colors">
                                     <X size={24} />
                                 </button>
                                 <img src={zoomedImage} alt="Zoomed View" className="w-[90%] max-h-[80%] object-contain rounded-xl shadow-2xl" onClick={e => e.stopPropagation()} />
+                            </div>
+                        )}
+
+                        {/* STORE DETAIL MODAL */}
+                        {selectedStore && (
+                            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-6 animate-fade-in" onClick={() => setSelectedStore(null)}>
+                                <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl relative" onClick={e => e.stopPropagation()}>
+                                    <button onClick={() => setSelectedStore(null)} className="absolute top-4 right-4 w-8 h-8 bg-gray-100 text-gray-400 rounded-full flex items-center justify-center hover:bg-gray-200 transition-colors">
+                                        <X size={20} />
+                                    </button>
+
+                                    <div className="p-8 pb-4 flex flex-col items-center border-b border-gray-50">
+                                        <div className="w-20 h-20 bg-orange-50 rounded-2xl flex items-center justify-center text-orange-500 mb-4 shadow-inner">
+                                            <Store size={40} />
+                                        </div>
+                                        <h2 className="text-2xl font-bold text-gray-800 text-center">{selectedStore.id}</h2>
+                                        {selectedStore.isFamous && (
+                                            <div className="mt-2 bg-orange-500 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-tighter shadow-sm flex items-center gap-1">
+                                                ★ สาขายอดนิยม
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="p-6 space-y-4">
+                                        {/* Item count */}
+                                        <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-2xl border border-gray-100">
+                                            <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-green-500 border border-gray-100">
+                                                <ShoppingBag size={20} />
+                                            </div>
+                                            <div>
+                                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">สินค้าในระบบ</div>
+                                                <div className="text-sm font-bold text-gray-700">
+                                                    {getStoreDeals(selectedStore.id).length} รายการ
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-2xl border border-gray-100">
+                                            <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-gray-400 border border-gray-100">
+                                                <MapPin size={20} />
+                                            </div>
+                                            <div>
+                                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">จังหวัด</div>
+                                                <div className="text-sm font-bold text-gray-700">{selectedStore.province || 'ไม่ระบุ'}</div>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-2xl border border-gray-100">
+                                            <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-gray-400 border border-gray-100">
+                                                <Zap size={20} />
+                                            </div>
+                                            <div>
+                                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">เบอร์โทรศัพท์</div>
+                                                {selectedStore.phone ? (
+                                                    <a href={`tel:${selectedStore.phone}`} className="text-sm font-bold text-blue-500 hover:underline">{selectedStore.phone}</a>
+                                                ) : (
+                                                    <div className="text-sm font-bold text-gray-700">ไม่ระบุ</div>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* View all store items button */}
+                                        {getStoreDeals(selectedStore.id).length > 0 && (
+                                            <button
+                                                onClick={() => {
+                                                    setSelectedStoreForDetail(selectedStore);
+                                                    setStoreSearchQuery('');
+                                                    setSelectedStore(null);
+                                                    setCurrentView('store_detail');
+                                                }}
+                                                className="w-full py-3.5 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-2xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-orange-100 active:scale-95 transition-all"
+                                            >
+                                                <Store size={16} /> ดูสินค้าทั้งหมดของร้านนี้
+                                            </button>
+                                        )}
+
+                                        {selectedStore.mapsUrl && (
+                                            <a
+                                                href={selectedStore.mapsUrl}
+                                                target="_blank"
+                                                className="w-full py-3.5 bg-slate-900 text-white rounded-2xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-gray-400 active:scale-95 transition-all"
+                                            >
+                                                <MapPin size={16} /> ดูแผนที่บน Google Maps
+                                            </a>
+                                        )}
+                                    </div>
+                                    <div className="h-6"></div>
+                                </div>
                             </div>
                         )}
 
