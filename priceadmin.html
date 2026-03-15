@@ -73,12 +73,12 @@
         import {
             LayoutDashboard, Edit2, Image as ImageIcon, Save, X, Search, AlertCircle,
             RefreshCw, CheckSquare, Bell, Store, ArrowRight, Check, XCircle, Tag,
-            Trash2, ToggleLeft, ToggleRight, Upload, Camera
+            Trash2, ToggleLeft, ToggleRight, Upload, Camera, Link2, ChevronDown, ChevronRight
         } from 'lucide-react';
         import { initializeApp } from 'firebase/app';
         import {
             getFirestore, collection, onSnapshot, query, orderBy,
-            doc, updateDoc, deleteDoc
+            doc, updateDoc, deleteDoc, setDoc
         } from 'firebase/firestore';
 
         const firebaseConfig = {
@@ -92,16 +92,10 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
-        // ─── Reusable StoreLogo component ────────────────────────────────────────────
-        // Adapts to any logo aspect ratio; shows icon fallback if no logo
         function StoreLogo({ logoUrl, storeName, size = 'md', className = '' }) {
             const sizeMap = {
-                xs: 'w-6 h-6',
-                sm: 'w-8 h-8',
-                md: 'w-10 h-10',
-                lg: 'w-16 h-16',
-                xl: 'w-20 h-20',
-                '2xl': 'w-24 h-24',
+                xs: 'w-6 h-6', sm: 'w-8 h-8', md: 'w-10 h-10',
+                lg: 'w-16 h-16', xl: 'w-20 h-20', '2xl': 'w-24 h-24',
             };
             const iconSizeMap = { xs: 12, sm: 14, md: 18, lg: 24, xl: 32, '2xl': 40 };
             const box = sizeMap[size] || sizeMap.md;
@@ -110,13 +104,8 @@
             if (logoUrl) {
                 return (
                     <div className={`${box} rounded-xl bg-white border border-gray-100 flex items-center justify-center overflow-hidden shadow-sm flex-shrink-0 ${className}`}>
-                        <img
-                            src={logoUrl}
-                            alt={storeName}
-                            className="w-full h-full object-contain p-0.5"
-                            onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
-                        />
-                        {/* Fallback hidden until image errors */}
+                        <img src={logoUrl} alt={storeName} className="w-full h-full object-contain p-0.5"
+                            onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }} />
                         <div style={{ display: 'none' }} className="w-full h-full items-center justify-center bg-orange-50 text-orange-400">
                             <Store size={iconSz} />
                         </div>
@@ -130,7 +119,6 @@
             );
         }
 
-        // ─── Logo Upload Section (reusable inside modal) ──────────────────────────────
         function LogoUploadSection({ currentLogoUrl, onLogoChange }) {
             const fileInputRef = useRef(null);
 
@@ -141,7 +129,6 @@
                 reader.onload = (ev) => {
                     const img = new window.Image();
                     img.onload = () => {
-                        // Preserve aspect ratio, cap longest side at 400px
                         const MAX = 400;
                         let w = img.width, h = img.height;
                         if (w > MAX || h > MAX) {
@@ -151,7 +138,6 @@
                         const canvas = document.createElement('canvas');
                         canvas.width = w; canvas.height = h;
                         const ctx = canvas.getContext('2d');
-                        // White background for logos with transparency
                         ctx.fillStyle = '#ffffff';
                         ctx.fillRect(0, 0, w, h);
                         ctx.drawImage(img, 0, 0, w, h);
@@ -166,7 +152,6 @@
                 <div className="space-y-2">
                     <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">โลโก้ร้าน (Logo)</label>
                     <div className="flex items-start gap-4">
-                        {/* Preview */}
                         <div className="w-24 h-24 rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden flex-shrink-0 shadow-inner">
                             {currentLogoUrl ? (
                                 <img src={currentLogoUrl} alt="logo preview" className="w-full h-full object-contain p-1" />
@@ -177,29 +162,15 @@
                                 </div>
                             )}
                         </div>
-
-                        {/* Controls */}
                         <div className="flex-1 space-y-2">
-                            <input
-                                ref={fileInputRef}
-                                type="file"
-                                accept="image/*"
-                                onChange={handleFile}
-                                className="hidden"
-                            />
-                            <button
-                                type="button"
-                                onClick={() => fileInputRef.current?.click()}
-                                className="w-full py-2.5 border-2 border-dashed border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-600 font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-colors active:scale-95"
-                            >
+                            <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />
+                            <button type="button" onClick={() => fileInputRef.current?.click()}
+                                className="w-full py-2.5 border-2 border-dashed border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-600 font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-colors active:scale-95">
                                 <Upload size={14} /> อัพโหลดโลโก้
                             </button>
                             {currentLogoUrl && (
-                                <button
-                                    type="button"
-                                    onClick={() => onLogoChange('')}
-                                    className="w-full py-2 text-xs font-bold text-red-400 hover:text-red-600 border border-red-100 rounded-xl hover:bg-red-50 transition-colors"
-                                >
+                                <button type="button" onClick={() => onLogoChange('')}
+                                    className="w-full py-2 text-xs font-bold text-red-400 hover:text-red-600 border border-red-100 rounded-xl hover:bg-red-50 transition-colors">
                                     ลบโลโก้
                                 </button>
                             )}
@@ -212,7 +183,6 @@
             );
         }
 
-        // ─── Main AdminApp ────────────────────────────────────────────────────────────
         function AdminApp() {
             const [deals, setDeals] = useState([]);
             const [searchQuery, setSearchQuery] = useState('');
@@ -244,6 +214,11 @@
             const [stores, setStores] = useState([]);
             const [editingStoreDetail, setEditingStoreDetail] = useState(null);
             const [showStoreModal, setShowStoreModal] = useState(false);
+
+            const [storeSortMode, setStoreSortMode] = useState('newest');
+            const [expandedStores, setExpandedStores] = useState([]);
+            const [relatingStore, setRelatingStore] = useState(null);
+            const [relateSearchQuery, setRelateSearchQuery] = useState('');
 
             const [mergeFinalName, setMergeFinalName] = useState('');
             const [mergeFinalImage, setMergeFinalImage] = useState('');
@@ -308,7 +283,6 @@
                 return () => { unsubscribe(); storesUnsub(); };
             }, []);
 
-            // ── Firebase helpers ──────────────────────────────────────────────────────
             const handleSaveImage = async (dealGroup) => {
                 try {
                     await Promise.all(dealGroup.originalItems.map(item =>
@@ -414,32 +388,86 @@
                 catch (e) { alert("Failed to update status."); }
             };
 
-            // ── Store detail save (with logoUrl) ─────────────────────────────────────
             const handleUpdateStoreDetail = async (e) => {
                 e.preventDefault();
-                const { name, mapsUrl, province, phone, isFamous, isVisible, logoUrl } = editingStoreDetail;
+                const { name, originalName, mapsUrl, province, phone, isVisible, logoUrl, isOfficial, manualAliases } = editingStoreDetail;
+                let newAliases = [];
+                if (manualAliases) {
+                    newAliases = manualAliases.split(',').map(s => s.trim()).filter(Boolean);
+                }
                 const payload = {
-                    mapsUrl: mapsUrl || "",
-                    province: province || "",
-                    phone: phone || "",
-                    isFamous: !!isFamous,
-                    isVisible: isVisible !== false,
-                    logoUrl: logoUrl || "",
-                    lastUpdated: Date.now()
+                    mapsUrl: mapsUrl || "", province: province || "", phone: phone || "",
+                    isVisible: isVisible !== false, isOfficial: !!isOfficial,
+                    logoUrl: logoUrl || "", lastUpdated: Date.now()
                 };
+                const existingStore = stores.find(s => s.id === (originalName || name));
+                const existingAliases = existingStore?.aliases || [];
+                payload.aliases = [...new Set([...existingAliases, ...newAliases])];
+
                 try {
-                    await updateDoc(doc(db, "stores", name), payload);
-                } catch {
-                    try {
-                        const { setDoc } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
-                        await setDoc(doc(db, "stores", name), payload);
-                    } catch (e2) {
-                        alert("Failed to save store details.");
-                        return;
+                    if (originalName && originalName !== name) {
+                        if (confirm(`คุณกำลังเปลี่ยนชื่อร้านจาก "${originalName}" เป็น "${name}"\nรายการสินค้าทั้งหมดจะถูกย้ายไปด้วย ยืนยันหรือไม่?`)) {
+                            await setDoc(doc(db, "stores", name), payload);
+                            const itemsToUpdate = rawItems.filter(i => i.store === originalName);
+                            await Promise.all(itemsToUpdate.map(item =>
+                                updateDoc(doc(db, "items", item.id), { store: name })
+                            ));
+                            await deleteDoc(doc(db, "stores", originalName));
+                        }
+                    } else {
+                        await setDoc(doc(db, "stores", name), payload, { merge: true });
                     }
+                } catch (err) {
+                    console.error(err);
+                    alert("Failed to save store details: " + err.message);
+                    return;
                 }
                 setShowStoreModal(false);
                 setEditingStoreDetail(null);
+            };
+
+            const handleRelateStore = async (wrongName, canonicalName) => {
+                if (!wrongName || !canonicalName) return;
+                const cleanWrong = wrongName.trim();
+                const cleanCanonical = canonicalName.trim();
+                if (cleanWrong.toLowerCase() === cleanCanonical.toLowerCase()) return;
+                if (!confirm(`เชื่อมร้าน "${cleanWrong}" → "${cleanCanonical}"\nรายการทั้งหมดจาก "${cleanWrong}" จะถูกย้ายไป "${cleanCanonical}"\nและ "${cleanWrong}" จะถูกบันทึกเป็นชื่อเก่า (alias)`)) return;
+                try {
+                    const canonicalMeta = stores.find(s => s.id === cleanCanonical) || {};
+                    const existingAliases = canonicalMeta.aliases || [];
+                    const newAliases = [...new Set([...existingAliases, cleanWrong])];
+                    await setDoc(doc(db, 'stores', cleanCanonical), {
+                        ...canonicalMeta, aliases: newAliases,
+                        adminStoreUpdatedAt: Date.now(), lastUpdated: Date.now(),
+                    }, { merge: true });
+                    const itemsToUpdate = rawItems.filter(i => (i.store || "").trim().toLowerCase() === cleanWrong.toLowerCase());
+                    await Promise.all(itemsToUpdate.map(item =>
+                        updateDoc(doc(db, 'items', item.id), { store: cleanCanonical })
+                    ));
+                    const wrongMeta = stores.find(s => s.id.trim().toLowerCase() === cleanWrong.toLowerCase());
+                    if (wrongMeta) {
+                        const wrongAliases = wrongMeta.aliases || [];
+                        if (wrongAliases.length > 0) {
+                            const mergedAliases = [...new Set([...newAliases, ...wrongAliases])];
+                            await setDoc(doc(db, 'stores', cleanCanonical), { aliases: mergedAliases }, { merge: true });
+                        }
+                        await deleteDoc(doc(db, 'stores', wrongMeta.id));
+                    }
+                    setRelatingStore(null);
+                } catch (e) {
+                    console.error(e);
+                    alert('เกิดข้อผิดพลาดในการเชื่อมร้าน: ' + e.message);
+                }
+            };
+
+            const handleRemoveAlias = async (storeName, aliasToRemove) => {
+                if (!confirm(`ต้องการลบชื่อเก่า (alias) "${aliasToRemove}" ออกจากร้าน "${storeName}" หรือไม่?`)) return;
+                try {
+                    const storeMeta = stores.find(s => s.id === storeName) || {};
+                    const existingAliases = storeMeta.aliases || [];
+                    const newAliases = existingAliases.filter(a => a !== aliasToRemove);
+                    await updateDoc(doc(db, 'stores', storeName), { aliases: newAliases, adminStoreUpdatedAt: Date.now() });
+                } catch (e) { alert("Failed to remove alias: " + e.message); }
             };
 
             const toggleMergeSelection = (groupId) => {
@@ -471,98 +499,120 @@
                 } catch (e) { alert("Error merging docs: " + e.message); }
             };
 
-            // ── Derived ───────────────────────────────────────────────────────────────
+            const storeAliasMap = {};
+            stores.forEach(s => {
+                if (s.aliases && s.aliases.length > 0) {
+                    s.aliases.forEach(alias => { storeAliasMap[alias.toLowerCase().trim()] = s.id; });
+                }
+            });
+            const resolveStoreName = (name) => {
+                if (!name) return name;
+                return storeAliasMap[name.toLowerCase().trim()] || name.trim();
+            };
+
             const filteredDeals = deals.filter(deal =>
                 (deal.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
                 (deal.brand || '').toLowerCase().includes(searchQuery.toLowerCase())
             );
             const uniqueProductNames = [...new Set(deals.map(d => d.name))].sort();
-            const allStoreNames = [...new Set(rawItems.map(i => i.store).filter(Boolean))].sort();
+            const allStoreNamesRaw = [...new Set(rawItems.map(i => resolveStoreName(i.store)).filter(Boolean))];
+
+            const allStoreNames = (() => {
+                const names = [...allStoreNamesRaw];
+                if (storeSortMode === 'alphabet') return names.sort((a, b) => a.localeCompare(b, 'th'));
+                if (storeSortMode === 'adminUpdated') {
+                    return names.sort((a, b) => {
+                        const metaA = stores.find(s => s.id === a) || {};
+                        const metaB = stores.find(s => s.id === b) || {};
+                        return (metaB.adminStoreUpdatedAt || 0) - (metaA.adminStoreUpdatedAt || 0);
+                    });
+                }
+                return names.sort((a, b) => {
+                    const latestA = Math.max(...rawItems.filter(i => i.store === a).map(i => i.lastUpdated || 0));
+                    const latestB = Math.max(...rawItems.filter(i => i.store === b).map(i => i.lastUpdated || 0));
+                    return latestB - latestA;
+                });
+            })();
             const pendingItems = rawItems.filter(i => i.adminStatus !== 'approved');
 
-            // ── Render ────────────────────────────────────────────────────────────────
+            // ── Compute colSpan for the expanded sub-row based on current tab ──
+            const getExpandedColSpan = () => {
+                if (adminTab === 'manage') return isDeleteMode ? 4 : 3;
+                if (adminTab === 'merge') return 5;
+                return 4; // dashboard
+            };
+
             return (
                 <div className="min-h-screen flex flex-col">
 
-                    {/* ── Store Edit Modal ──────────────────────────────────────────── */}
+                    {/* Store Edit Modal */}
                     {showStoreModal && editingStoreDetail && (
                         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
                             <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-fade-in max-h-[90vh] flex flex-col">
                                 <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-slate-900 text-white flex-shrink-0">
                                     <div className="flex items-center gap-3">
-                                        <StoreLogo
-                                            logoUrl={editingStoreDetail.logoUrl}
-                                            storeName={editingStoreDetail.name}
-                                            size="sm"
-                                        />
+                                        <StoreLogo logoUrl={editingStoreDetail.logoUrl} storeName={editingStoreDetail.name} size="sm" />
                                         <h2 className="text-lg font-bold">แก้ไขข้อมูลร้าน: <span className="text-orange-400">{editingStoreDetail.name}</span></h2>
                                     </div>
-                                    <button onClick={() => setShowStoreModal(false)} className="text-white/60 hover:text-white">
-                                        <X size={24} />
-                                    </button>
+                                    <button onClick={() => setShowStoreModal(false)} className="text-white/60 hover:text-white"><X size={24} /></button>
                                 </div>
-
                                 <form onSubmit={handleUpdateStoreDetail} className="p-6 space-y-5 overflow-y-auto flex-1">
-
-                                    {/* ── Logo Upload ── */}
                                     <LogoUploadSection
                                         currentLogoUrl={editingStoreDetail.logoUrl}
                                         onLogoChange={(url) => setEditingStoreDetail({ ...editingStoreDetail, logoUrl: url })}
                                     />
-
                                     <div className="border-t border-gray-100 pt-4 space-y-4">
                                         <div className="space-y-1">
+                                            <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">ชื่อร้าน (Rename)</label>
+                                            <input type="text" value={editingStoreDetail.name}
+                                                onChange={e => setEditingStoreDetail({ ...editingStoreDetail, name: e.target.value })}
+                                                placeholder="ชื่อร้าน..."
+                                                className="w-full p-3 bg-white border-2 border-orange-100 rounded-xl text-sm font-bold focus:border-orange-500 focus:outline-none" />
+                                        </div>
+                                        <div className="space-y-1">
                                             <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">จังหวัด</label>
-                                            <input
-                                                type="text"
-                                                value={editingStoreDetail.province}
+                                            <input type="text" value={editingStoreDetail.province}
                                                 onChange={e => setEditingStoreDetail({ ...editingStoreDetail, province: e.target.value })}
                                                 placeholder="เช่น กรุงเทพฯ, เชียงใหม่"
-                                                className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:border-orange-500 focus:outline-none"
-                                            />
+                                                className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:border-orange-500 focus:outline-none" />
                                         </div>
                                         <div className="space-y-1">
                                             <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">เบอร์โทรศัพท์</label>
-                                            <input
-                                                type="text"
-                                                value={editingStoreDetail.phone}
+                                            <input type="text" value={editingStoreDetail.phone}
                                                 onChange={e => setEditingStoreDetail({ ...editingStoreDetail, phone: e.target.value })}
                                                 placeholder="02-XXX-XXXX"
-                                                className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:border-orange-500 focus:outline-none"
-                                            />
+                                                className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:border-orange-500 focus:outline-none" />
                                         </div>
                                         <div className="space-y-1">
                                             <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Google Maps URL</label>
-                                            <input
-                                                type="text"
-                                                value={editingStoreDetail.mapsUrl}
+                                            <input type="text" value={editingStoreDetail.mapsUrl}
                                                 onChange={e => setEditingStoreDetail({ ...editingStoreDetail, mapsUrl: e.target.value })}
                                                 placeholder="https://goo.gl/maps/..."
-                                                className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:border-orange-500 focus:outline-none"
-                                            />
+                                                className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:border-orange-500 focus:outline-none" />
                                         </div>
                                         <div className="flex gap-4 pt-2">
                                             <label className="flex-1 p-3 bg-gray-50 rounded-xl border border-gray-200 flex items-center justify-between cursor-pointer active:scale-95 transition-transform">
-                                                <span className="text-xs font-bold text-gray-600">ร้านยอดนิยม (Famous)</span>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={editingStoreDetail.isFamous}
-                                                    onChange={e => setEditingStoreDetail({ ...editingStoreDetail, isFamous: e.target.checked })}
-                                                    className="w-5 h-5 accent-orange-500"
-                                                />
+                                                <span className="text-xs font-bold text-gray-600">ชื่อทางการ (Official)</span>
+                                                <input type="checkbox" checked={editingStoreDetail.isOfficial}
+                                                    onChange={e => setEditingStoreDetail({ ...editingStoreDetail, isOfficial: e.target.checked })}
+                                                    className="w-5 h-5 accent-blue-500" />
                                             </label>
                                             <label className="flex-1 p-3 bg-gray-50 rounded-xl border border-gray-200 flex items-center justify-between cursor-pointer active:scale-95 transition-transform">
                                                 <span className="text-xs font-bold text-gray-600">แสดงผล (Visible)</span>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={editingStoreDetail.isVisible}
+                                                <input type="checkbox" checked={editingStoreDetail.isVisible}
                                                     onChange={e => setEditingStoreDetail({ ...editingStoreDetail, isVisible: e.target.checked })}
-                                                    className="w-5 h-5 accent-green-500"
-                                                />
+                                                    className="w-5 h-5 accent-green-500" />
                                             </label>
                                         </div>
+                                        <div className="space-y-1 pt-2 border-t border-gray-100">
+                                            <label className="text-xs font-bold text-blue-600 uppercase tracking-widest flex items-center gap-1"><Link2 size={12} /> เพิ่มนามแฝง (Manual Aliases)</label>
+                                            <p className="text-[10px] text-gray-400 font-medium pb-1">พิมพ์ชื่อผิดที่พบบ่อย คั่นด้วยเครื่องหมายจุลภาค (,) เช่น Cj, cj, ซีเจ</p>
+                                            <input type="text" value={editingStoreDetail.manualAliases}
+                                                onChange={e => setEditingStoreDetail({ ...editingStoreDetail, manualAliases: e.target.value })}
+                                                placeholder="ชื่อที่ 1, ชื่อที่ 2..."
+                                                className="w-full p-3 bg-blue-50/50 border border-blue-200 rounded-xl text-sm focus:border-blue-500 focus:outline-none" />
+                                        </div>
                                     </div>
-
                                     <div className="pt-4 flex gap-3">
                                         <button type="submit" className="flex-1 bg-orange-500 py-3 text-white font-bold rounded-xl shadow-lg shadow-orange-200 hover:bg-orange-600 active:scale-95 transition-all">
                                             บันทึกข้อมูล
@@ -576,23 +626,21 @@
                         </div>
                     )}
 
-                    {/* ── Header ───────────────────────────────────────────────────────── */}
+                    {/* Header */}
                     <header className="bg-slate-900 text-white p-4 shadow-md sticky top-0 z-10 flex justify-between items-center px-8">
                         <div className="flex items-center gap-3">
                             <LayoutDashboard className="text-orange-500" size={28} />
                             <h1 className="text-xl font-bold">DealHunter <span className="text-orange-500">Admin</span></h1>
                         </div>
                         <div className="relative w-96">
-                            <input
-                                type="text" placeholder="ค้นหาสินค้า, ยี่ห้อ..."
+                            <input type="text" placeholder="ค้นหาสินค้า, ยี่ห้อ..."
                                 value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-                                className="w-full py-2 pl-10 pr-4 rounded-lg bg-slate-800 border border-slate-700 text-sm text-white focus:outline-none focus:border-orange-500"
-                            />
+                                className="w-full py-2 pl-10 pr-4 rounded-lg bg-slate-800 border border-slate-700 text-sm text-white focus:outline-none focus:border-orange-500" />
                             <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
                         </div>
                     </header>
 
-                    {/* ── Nav Tabs ──────────────────────────────────────────────────────── */}
+                    {/* Nav Tabs */}
                     <div className="bg-white border-b border-gray-200 px-8 flex gap-6 overflow-x-auto">
                         {[
                             { key: 'dashboard', icon: <LayoutDashboard size={18} />, label: 'ภาพรวม (Dashboard)' },
@@ -614,11 +662,9 @@
                                 badgeColor: 'bg-gray-100 text-gray-500'
                             },
                         ].map(tab => (
-                            <button
-                                key={tab.key}
+                            <button key={tab.key}
                                 onClick={() => { setAdminTab(tab.key); setSelectedForMerge([]); setIsDeleteMode(false); setExpandedGroups([]); }}
-                                className={`py-4 font-bold text-sm border-b-2 flex items-center gap-2 transition-colors whitespace-nowrap ${adminTab === tab.key ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
-                            >
+                                className={`py-4 font-bold text-sm border-b-2 flex items-center gap-2 transition-colors whitespace-nowrap ${adminTab === tab.key ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>
                                 {tab.icon} {tab.label}
                                 {tab.badge && <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${tab.badgeColor}`}>{tab.badge}</span>}
                             </button>
@@ -628,88 +674,169 @@
                     {/* Delete mode bar */}
                     {adminTab === 'manage' && (
                         <div className="bg-slate-50 border-b border-gray-200 px-8 py-3 flex justify-end items-center shadow-sm z-10 relative">
-                            <button
-                                onClick={() => setIsDeleteMode(!isDeleteMode)}
-                                className={`flex items-center gap-2 px-3 py-1.5 rounded-full font-bold text-sm transition-colors ${isDeleteMode ? 'bg-red-100 text-red-600 border border-red-200 shadow-inner' : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'}`}
-                            >
+                            <button onClick={() => setIsDeleteMode(!isDeleteMode)}
+                                className={`flex items-center gap-2 px-3 py-1.5 rounded-full font-bold text-sm transition-colors ${isDeleteMode ? 'bg-red-100 text-red-600 border border-red-200 shadow-inner' : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'}`}>
                                 {isDeleteMode ? <ToggleRight size={18} /> : <ToggleLeft size={18} />} Delete mode : {isDeleteMode ? 'ON' : 'OFF'}
                             </button>
                         </div>
                     )}
 
-                    {/* ── Main Content ──────────────────────────────────────────────────── */}
                     <main className="flex-1 p-8 overflow-y-auto relative">
 
                         {/* ========== STORES TAB ========== */}
                         {adminTab === 'stores' && (
-                            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden animate-fade-in">
-                                <div className="p-4 bg-slate-50 border-b border-gray-200 flex justify-between items-center">
-                                    <h2 className="font-bold text-slate-800">รายชื่อร้านค้า/สาขาทั้งหมด ({allStoreNames.length})</h2>
-                                    <div className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">คลิก "แก้ไขข้อมูล" เพื่ออัพโหลดโลโก้และข้อมูลร้าน</div>
+                            <div className="animate-fade-in space-y-4">
+                                <div className="flex items-center justify-between">
+                                    <h2 className="font-bold text-slate-800 text-lg">ร้านค้าทั้งหมด ({allStoreNames.length})</h2>
+                                    <div className="flex bg-white rounded-full border border-gray-200 shadow-sm p-0.5">
+                                        {[
+                                            { key: 'newest', label: 'ใหม่ล่าสุด' },
+                                            { key: 'alphabet', label: 'ก-ฮ A-Z' },
+                                            { key: 'adminUpdated', label: 'Admin Updated' },
+                                        ].map(s => (
+                                            <button key={s.key} onClick={() => setStoreSortMode(s.key)}
+                                                className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${storeSortMode === s.key ? 'bg-orange-500 text-white shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}>
+                                                {s.label}
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
-                                <table className="w-full text-left text-sm">
-                                    <thead className="bg-slate-50 text-slate-600 font-bold border-b border-gray-200">
-                                        <tr>
-                                            <th className="p-4 w-20 text-center">โลโก้</th>
-                                            <th className="p-4">ชื่อร้าน</th>
-                                            <th className="p-4">จังหวัด</th>
-                                            <th className="p-4">เบอร์โทร</th>
-                                            <th className="p-4">Google Maps</th>
-                                            <th className="p-4 text-center">ประเภท</th>
-                                            <th className="p-4 text-center">สถานะ</th>
-                                            <th className="p-4 text-right">ดำเนินการ</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-100">
+
+                                {relatingStore && (
+                                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+                                        <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-fade-in">
+                                            <div className="p-5 border-b border-gray-100 bg-slate-900 text-white flex justify-between items-center">
+                                                <div className="flex items-center gap-2">
+                                                    <Link2 size={20} className="text-orange-400" />
+                                                    <h2 className="font-bold">เชื่อมร้าน</h2>
+                                                </div>
+                                                <button onClick={() => setRelatingStore(null)} className="text-white/60 hover:text-white"><X size={20} /></button>
+                                            </div>
+                                            <div className="p-5 space-y-4">
+                                                <div className="text-center">
+                                                    <div className="text-xs text-gray-500 mb-1">ชื่อที่ต้องการแก้ไข</div>
+                                                    <div className="text-lg font-bold text-red-500 bg-red-50 rounded-lg py-2 px-4 inline-block">{relatingStore}</div>
+                                                </div>
+                                                <div className="flex justify-center text-gray-300"><ArrowRight size={24} /></div>
+                                                <div className="text-xs text-gray-500 text-center font-bold">เลือกร้านที่ถูกต้อง:</div>
+                                                <div className="max-h-60 overflow-y-auto space-y-1 border border-gray-200 rounded-xl p-2">
+                                                    {allStoreNames.filter(s => s !== relatingStore).map(s => {
+                                                        const sMeta = stores.find(st => st.id === s) || {};
+                                                        return (
+                                                            <button key={s} onClick={() => handleRelateStore(relatingStore, s)}
+                                                                className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-orange-50 hover:border-orange-200 border border-transparent transition-colors flex items-center gap-3">
+                                                                <StoreLogo logoUrl={sMeta.logoUrl} storeName={s} size="sm" />
+                                                                <div>
+                                                                    <div className="font-bold text-sm text-gray-800">{s}</div>
+                                                                    <div className="text-[10px] text-gray-400">{rawItems.filter(i => i.store === s).length} รายการ</div>
+                                                                </div>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                                    <div className="divide-y divide-gray-100">
                                         {allStoreNames.map(storeName => {
                                             const meta = stores.find(s => s.id === storeName) || {};
+                                            const isExpanded = expandedStores.includes(storeName);
+                                            const storeItems = rawItems.filter(i => resolveStoreName(i.store) === storeName);
+                                            const aliases = meta.aliases || [];
                                             return (
-                                                <tr key={storeName} className="hover:bg-slate-50">
-                                                    {/* Logo column */}
-                                                    <td className="p-4 text-center">
-                                                        <div className="flex justify-center">
-                                                            <StoreLogo logoUrl={meta.logoUrl} storeName={storeName} size="md" />
+                                                <React.Fragment key={storeName}>
+                                                    <div className={`flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition-colors cursor-pointer ${isExpanded ? 'bg-slate-50' : ''}`}
+                                                        onClick={() => setExpandedStores(prev => prev.includes(storeName) ? prev.filter(s => s !== storeName) : [...prev, storeName])}>
+                                                        <div className="text-gray-400 flex-shrink-0">
+                                                            {isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
                                                         </div>
-                                                    </td>
-                                                    <td className="p-4 font-bold text-slate-700">{storeName}</td>
-                                                    <td className="p-4">{meta.province || '-'}</td>
-                                                    <td className="p-4">{meta.phone || '-'}</td>
-                                                    <td className="p-4 truncate max-w-[150px]">
-                                                        {meta.mapsUrl ? <a href={meta.mapsUrl} target="_blank" className="text-blue-500 hover:underline">{meta.mapsUrl}</a> : '-'}
-                                                    </td>
-                                                    <td className="p-4 text-center">
-                                                        {meta.isFamous && <span className="bg-orange-100 text-orange-600 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">Famous</span>}
-                                                    </td>
-                                                    <td className="p-4 text-center">
-                                                        {meta.isVisible !== false
-                                                            ? <span className="text-green-500 flex items-center justify-center gap-1 font-bold text-[10px]"><Check size={12} /> แสดงผล</span>
-                                                            : <span className="text-gray-400 flex items-center justify-center gap-1 font-bold text-[10px]"><X size={12} /> ซ่อนอยู่</span>
-                                                        }
-                                                    </td>
-                                                    <td className="p-4 text-right">
-                                                        <button
-                                                            onClick={() => {
+                                                        <StoreLogo logoUrl={meta.logoUrl} storeName={storeName} size="md" />
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="font-bold text-gray-800 flex items-center gap-1">
+                                                                    {storeName}
+                                                                    {meta.isOfficial && <span className="text-[10px] bg-blue-500 text-white px-1 rounded-sm shadow-sm ml-1">★</span>}
+                                                                </span>
+                                                                <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">{storeItems.length} รายการ</span>
+                                                                {meta.isVisible === false && <span className="bg-gray-100 text-gray-400 text-[9px] font-bold px-1.5 py-0.5 rounded">ซ่อนอยู่</span>}
+                                                            </div>
+                                                            {aliases.length > 0 && (
+                                                                <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                                                                    <Link2 size={10} className="text-blue-400" />
+                                                                    {aliases.map(a => (
+                                                                        <span key={a} className="text-[9px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-medium">{a}</span>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                            {meta.province && <div className="text-[10px] text-gray-400 mt-0.5">{meta.province}</div>}
+                                                        </div>
+                                                        <div className="flex items-center gap-2 flex-shrink-0" onClick={e => e.stopPropagation()}>
+                                                            <button onClick={() => setRelatingStore(storeName)}
+                                                                className="text-blue-500 hover:bg-blue-50 px-2.5 py-1.5 rounded-lg font-bold text-[10px] border border-blue-200 flex items-center gap-1 transition-colors">
+                                                                <Link2 size={12} /> เชื่อมร้าน
+                                                            </button>
+                                                            <button onClick={() => {
                                                                 setEditingStoreDetail({
-                                                                    name: storeName,
-                                                                    mapsUrl: meta.mapsUrl || '',
-                                                                    province: meta.province || '',
-                                                                    phone: meta.phone || '',
-                                                                    isFamous: !!meta.isFamous,
-                                                                    isVisible: meta.isVisible !== false,
-                                                                    logoUrl: meta.logoUrl || ''
+                                                                    name: storeName, originalName: storeName,
+                                                                    mapsUrl: meta.mapsUrl || '', province: meta.province || '',
+                                                                    phone: meta.phone || '', isVisible: meta.isVisible !== false,
+                                                                    isOfficial: !!meta.isOfficial, logoUrl: meta.logoUrl || '',
+                                                                    manualAliases: ''
                                                                 });
                                                                 setShowStoreModal(true);
                                                             }}
-                                                            className="text-orange-500 hover:bg-orange-50 px-3 py-1.5 rounded font-bold text-xs border border-orange-200"
-                                                        >
-                                                            แก้ไขข้อมูล
-                                                        </button>
-                                                    </td>
-                                                </tr>
+                                                                className="text-orange-500 hover:bg-orange-50 px-2.5 py-1.5 rounded-lg font-bold text-[10px] border border-orange-200 flex items-center gap-1 transition-colors">
+                                                                <Edit2 size={12} /> แก้ไขข้อมูล
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    {isExpanded && (
+                                                        <div className="bg-gray-50/80 border-t border-gray-200 px-4 py-3">
+                                                            <div className="ml-8 space-y-2">
+                                                                {aliases.length > 0 && (
+                                                                    <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 mb-3">
+                                                                        <div className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-1.5 flex items-center gap-1"><Link2 size={10} /> ชื่อเก่าที่เชื่อมไว้ (Aliases)</div>
+                                                                        <div className="flex flex-wrap gap-1.5">
+                                                                            {aliases.map(a => (
+                                                                                <span key={a} className="bg-white text-blue-700 pl-2 pr-1 py-1 rounded text-xs font-medium border border-blue-200 shadow-sm flex items-center gap-1 group">
+                                                                                    {a}
+                                                                                    <button onClick={(e) => { e.stopPropagation(); handleRemoveAlias(storeName, a); }}
+                                                                                        className="text-blue-300 hover:text-red-500 hover:bg-red-50 rounded-full p-0.5 transition-colors focus:outline-none">
+                                                                                        <X size={12} />
+                                                                                    </button>
+                                                                                </span>
+                                                                            ))}
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                                <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">รายการสินค้า ({storeItems.length})</div>
+                                                                {storeItems.map(item => (
+                                                                    <div key={item.id} className="bg-white border border-gray-200 rounded-lg p-3 flex items-center gap-3 shadow-sm">
+                                                                        <div className="w-10 h-10 rounded-lg bg-gray-100 flex-shrink-0 overflow-hidden border border-gray-200">
+                                                                            {item.image ? <img src={item.image} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-300"><ImageIcon size={16} /></div>}
+                                                                        </div>
+                                                                        <div className="flex-1 min-w-0">
+                                                                            <div className="font-bold text-gray-800 text-sm truncate">{item.name}</div>
+                                                                            <div className="text-[10px] text-gray-400">{item.lastUpdated ? new Date(item.lastUpdated).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}</div>
+                                                                        </div>
+                                                                        <div className="text-right flex-shrink-0">
+                                                                            <div className="font-bold text-orange-600 text-sm">฿{item.price}</div>
+                                                                            <div className="text-[10px] text-gray-400">{item.unitQuantity || 1} {item.unitType || 'ชิ้น'}</div>
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                                {storeItems.length === 0 && <div className="text-xs text-gray-400 italic py-2">ไม่มีรายการสินค้า</div>}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </React.Fragment>
                                             );
                                         })}
-                                    </tbody>
-                                </table>
+                                    </div>
+                                </div>
                             </div>
                         )}
 
@@ -725,6 +852,8 @@
                                             {adminTab !== 'manage' && <th className="p-4 w-32 text-right">ช่วงราคา (฿)</th>}
                                             {adminTab !== 'manage' && <th className="p-4 w-48">จำนวนโพสต์บอกต่อ</th>}
                                             {adminTab === 'manage' && <th className="p-4 w-48">จัดการรูปรวม</th>}
+                                            {/* ── FIX: always show expand column in manage tab ── */}
+                                            {adminTab === 'manage' && <th className="p-4 w-24 text-center text-gray-400 text-xs font-bold">ดูโพสต์</th>}
                                             {adminTab === 'manage' && isDeleteMode && <th className="p-4 w-20 text-center text-red-500"><Trash2 size={16} className="mx-auto" /></th>}
                                         </tr>
                                     </thead>
@@ -736,157 +865,195 @@
                                                     ไม่มีข้อมูลสินค้า
                                                 </td>
                                             </tr>
-                                        ) : filteredDeals.map(dealGroup => (
-                                            <React.Fragment key={dealGroup.id}>
-                                                <tr className={`hover:bg-slate-50 transition-colors border-b border-gray-100 ${selectedForMerge.includes(dealGroup.id) ? 'bg-orange-50/30' : ''}`}>
-                                                    {adminTab === 'merge' && (
+                                        ) : filteredDeals.map(dealGroup => {
+                                            const isExpanded = expandedGroups.includes(dealGroup.id);
+                                            return (
+                                                <React.Fragment key={dealGroup.id}>
+                                                    <tr className={`hover:bg-slate-50 transition-colors border-b border-gray-100 ${selectedForMerge.includes(dealGroup.id) ? 'bg-orange-50/30' : ''} ${isExpanded ? 'bg-blue-50/20' : ''}`}>
+                                                        {adminTab === 'merge' && (
+                                                            <td className="p-4 text-center">
+                                                                <input type="checkbox"
+                                                                    checked={selectedForMerge.includes(dealGroup.id)}
+                                                                    onChange={() => toggleMergeSelection(dealGroup.id)}
+                                                                    className="w-5 h-5 rounded border-gray-300 text-orange-500 focus:ring-orange-500 cursor-pointer" />
+                                                            </td>
+                                                        )}
                                                         <td className="p-4 text-center">
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={selectedForMerge.includes(dealGroup.id)}
-                                                                onChange={() => toggleMergeSelection(dealGroup.id)}
-                                                                className="w-5 h-5 rounded border-gray-300 text-orange-500 focus:ring-orange-500 cursor-pointer"
-                                                            />
-                                                        </td>
-                                                    )}
-                                                    <td className="p-4 text-center">
-                                                        {dealGroup.masterImage ? (
-                                                            <img src={dealGroup.masterImage} alt={dealGroup.name} className="w-16 h-16 object-cover rounded shadow-sm mx-auto cursor-pointer" onClick={() => toggleExpand(dealGroup.id)} />
-                                                        ) : (
-                                                            <div onClick={() => toggleExpand(dealGroup.id)} className="w-16 h-16 bg-gray-100 rounded flex items-center justify-center text-gray-300 mx-auto border border-gray-200 cursor-pointer">
-                                                                <ImageIcon size={24} />
-                                                            </div>
-                                                        )}
-                                                    </td>
-                                                    <td className="p-4">
-                                                        {adminTab === 'manage' && editingNameId === dealGroup.id ? (
-                                                            <div className="flex flex-col gap-1 mb-2">
-                                                                <input type="text" value={newName} onChange={e => setNewName(e.target.value)}
-                                                                    className="w-full text-base font-bold p-2 border border-orange-300 rounded focus:border-orange-500" autoFocus />
-                                                                <div className="flex gap-2 mt-1">
-                                                                    <button onClick={() => handleSaveName(dealGroup)} className="bg-orange-500 text-white text-[10px] px-3 py-1.5 rounded font-bold">บันทึกชื่อ</button>
-                                                                    <button onClick={() => setEditingNameId(null)} className="bg-gray-200 text-gray-700 text-[10px] px-3 py-1.5 rounded font-bold">ยกเลิก</button>
-                                                                </div>
-                                                            </div>
-                                                        ) : (
-                                                            <>
-                                                                <div className="font-bold text-gray-800 text-base cursor-pointer flex items-center gap-2 group" onClick={() => {
-                                                                    adminTab === 'manage' ? (setEditingNameId(dealGroup.id), setNewName(dealGroup.name || '')) : toggleExpand(dealGroup.id);
-                                                                }}>
-                                                                    {dealGroup.name}
-                                                                    {adminTab === 'manage'
-                                                                        ? <span className="opacity-0 group-hover:opacity-100 transition-opacity text-orange-500 text-[10px] font-normal px-2 py-0.5 bg-orange-50 rounded">✎ แก้ไขชื่อ</span>
-                                                                        : <span className="text-gray-400 bg-gray-100 rounded px-1.5 py-0.5 text-xs">{expandedGroups.includes(dealGroup.id) ? 'ย่อ ▲' : 'ขยาย ▼'}</span>
-                                                                    }
-                                                                </div>
-                                                                {dealGroup.brand && <div className="text-xs font-semibold text-gray-500 uppercase tracking-widest mt-1">ยี่ห้อ: {dealGroup.brand}</div>}
-                                                            </>
-                                                        )}
-                                                        {adminTab === 'manage' ? (
-                                                            editingDescId === dealGroup.id ? (
-                                                                <div className="mt-3 flex flex-col gap-1">
-                                                                    <textarea value={newDesc} onChange={e => setNewDesc(e.target.value)} placeholder="ใส่รายละเอียดสินค้า..."
-                                                                        className="w-full text-xs p-2 border border-blue-300 rounded focus:border-blue-500" rows="2" />
-                                                                    <div className="flex gap-2 mt-1">
-                                                                        <button onClick={() => handleSaveDesc(dealGroup)} className="bg-blue-500 text-white text-[10px] px-3 py-1.5 rounded font-bold">บันทึกเนื้อหา</button>
-                                                                        <button onClick={() => setEditingDescId(null)} className="bg-gray-200 text-gray-700 text-[10px] px-3 py-1.5 rounded font-bold">ยกเลิก</button>
-                                                                    </div>
-                                                                </div>
+                                                            {dealGroup.masterImage ? (
+                                                                <img src={dealGroup.masterImage} alt={dealGroup.name}
+                                                                    className="w-16 h-16 object-cover rounded shadow-sm mx-auto cursor-pointer hover:opacity-80 transition-opacity"
+                                                                    onClick={() => toggleExpand(dealGroup.id)} />
                                                             ) : (
-                                                                <div className="mt-2 text-xs text-gray-600 border-l-2 border-orange-200 pl-2 cursor-pointer hover:bg-orange-50 p-1 rounded group transition-colors" onClick={() => { setEditingDescId(dealGroup.id); setNewDesc(dealGroup.description || ''); }}>
-                                                                    {dealGroup.description ? <span className="line-clamp-2">{dealGroup.description} <span className="opacity-0 group-hover:opacity-100 transition-opacity text-orange-500 ml-1">✎</span></span>
-                                                                        : <span className="text-orange-400 font-medium italic">+ เพิ่มรายละเอียดสินค้า ✎</span>}
-                                                                </div>
-                                                            )
-                                                        ) : (
-                                                            dealGroup.description && (
-                                                                <div className="mt-2 text-xs text-gray-600 border-l-2 border-gray-200 pl-2 p-1 line-clamp-2">{dealGroup.description}</div>
-                                                            )
-                                                        )}
-                                                    </td>
-                                                    {adminTab !== 'manage' && (
-                                                        <>
-                                                            <td className="p-4 text-right">
-                                                                <div className="text-sm font-bold text-orange-600">
-                                                                    {dealGroup.lowestPpu === dealGroup.highestPpu
-                                                                        ? `฿${dealGroup.lowestPpu?.toFixed(2)}`
-                                                                        : `฿${dealGroup.lowestPpu?.toFixed(2)} - ฿${dealGroup.highestPpu?.toFixed(2)}`}
-                                                                </div>
-                                                                <div className="text-[10px] text-gray-500 mt-1">ต่อ {dealGroup.unitType}</div>
-                                                            </td>
-                                                            <td className="p-4">
-                                                                <div className="text-xs text-gray-600 font-bold bg-gray-100 px-2 py-1 rounded inline-block mt-1">
-                                                                    {dealGroup.postsCount} โพสต์/ร้าน
-                                                                </div>
-                                                            </td>
-                                                        </>
-                                                    )}
-                                                    {adminTab === 'manage' && (
-                                                        <td className="p-4">
-                                                            {editingId === dealGroup.id ? (
-                                                                <div className="flex flex-col gap-2">
-                                                                    <input type="text" value={newImageUrl} onChange={e => setNewImageUrl(e.target.value)}
-                                                                        placeholder="วางลิงก์รูปภาพ..." autoFocus
-                                                                        className="w-full text-xs p-2 border border-gray-300 rounded focus:border-orange-500 focus:outline-none" />
-                                                                    <div className="flex gap-2">
-                                                                        <button onClick={() => handleSaveImage(dealGroup)} className="flex-1 bg-green-500 text-white text-xs font-bold py-1.5 rounded hover:bg-green-600 flex justify-center items-center gap-1 shadow-sm"><Save size={12} /> บันทึก</button>
-                                                                        <button onClick={() => setEditingId(null)} className="flex-1 bg-gray-200 text-gray-700 text-xs font-bold py-1.5 rounded flex justify-center items-center gap-1"><X size={12} /> ยกเลิก</button>
-                                                                    </div>
-                                                                </div>
-                                                            ) : (
-                                                                <div className="flex flex-col gap-2">
-                                                                    <button onClick={() => { setEditingId(dealGroup.id); setNewImageUrl(dealGroup.masterImage || ''); }}
-                                                                        className="w-full bg-white border border-gray-300 text-gray-700 text-xs font-bold py-2 rounded shadow-sm hover:bg-gray-50 flex items-center justify-center gap-2 transition-colors">
-                                                                        <Edit2 size={14} /> แก้ไขรูปภาพรวม
-                                                                    </button>
-                                                                    {dealGroup.masterImage && isDeleteMode && (
-                                                                        <button onClick={() => handleDeleteImage(dealGroup)} className="w-full text-red-500 text-xs font-bold py-1 hover:underline">ลบรูปภาพ</button>
-                                                                    )}
+                                                                <div onClick={() => toggleExpand(dealGroup.id)}
+                                                                    className="w-16 h-16 bg-gray-100 rounded flex items-center justify-center text-gray-300 mx-auto border border-gray-200 cursor-pointer hover:bg-gray-200 transition-colors">
+                                                                    <ImageIcon size={24} />
                                                                 </div>
                                                             )}
                                                         </td>
-                                                    )}
-                                                    {adminTab === 'manage' && isDeleteMode && (
-                                                        <td className="p-4 text-center">
-                                                            <button onClick={e => { e.stopPropagation(); handleDeleteGroup(dealGroup); }}
-                                                                className="text-white bg-red-500 hover:bg-red-600 p-2 rounded-full shadow-sm transition-colors" title="ลบกลุ่มสินค้านี้">
-                                                                <Trash2 size={16} />
-                                                            </button>
+                                                        <td className="p-4">
+                                                            {/* ── FIX: name click in manage goes to edit; expand has its own button ── */}
+                                                            {adminTab === 'manage' && editingNameId === dealGroup.id ? (
+                                                                <div className="flex flex-col gap-1 mb-2">
+                                                                    <input type="text" value={newName} onChange={e => setNewName(e.target.value)}
+                                                                        className="w-full text-base font-bold p-2 border border-orange-300 rounded focus:border-orange-500" autoFocus />
+                                                                    <div className="flex gap-2 mt-1">
+                                                                        <button onClick={() => handleSaveName(dealGroup)} className="bg-orange-500 text-white text-[10px] px-3 py-1.5 rounded font-bold">บันทึกชื่อ</button>
+                                                                        <button onClick={() => setEditingNameId(null)} className="bg-gray-200 text-gray-700 text-[10px] px-3 py-1.5 rounded font-bold">ยกเลิก</button>
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <>
+                                                                    <div className="font-bold text-gray-800 text-base flex items-center gap-2 group">
+                                                                        {adminTab === 'manage' ? (
+                                                                            /* clicking name = edit name */
+                                                                            <span className="cursor-pointer hover:text-orange-600 transition-colors"
+                                                                                onClick={() => { setEditingNameId(dealGroup.id); setNewName(dealGroup.name || ''); }}>
+                                                                                {dealGroup.name}
+                                                                                <span className="opacity-0 group-hover:opacity-100 transition-opacity text-orange-500 text-[10px] font-normal px-2 py-0.5 bg-orange-50 rounded ml-1">✎ แก้ไขชื่อ</span>
+                                                                            </span>
+                                                                        ) : (
+                                                                            <span className="cursor-pointer" onClick={() => toggleExpand(dealGroup.id)}>
+                                                                                {dealGroup.name}
+                                                                                <span className="text-gray-400 bg-gray-100 rounded px-1.5 py-0.5 text-xs ml-2">{isExpanded ? 'ย่อ ▲' : 'ขยาย ▼'}</span>
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                    {dealGroup.brand && <div className="text-xs font-semibold text-gray-500 uppercase tracking-widest mt-1">ยี่ห้อ: {dealGroup.brand}</div>}
+                                                                </>
+                                                            )}
+                                                            {adminTab === 'manage' ? (
+                                                                editingDescId === dealGroup.id ? (
+                                                                    <div className="mt-3 flex flex-col gap-1">
+                                                                        <textarea value={newDesc} onChange={e => setNewDesc(e.target.value)} placeholder="ใส่รายละเอียดสินค้า..."
+                                                                            className="w-full text-xs p-2 border border-blue-300 rounded focus:border-blue-500" rows="2" />
+                                                                        <div className="flex gap-2 mt-1">
+                                                                            <button onClick={() => handleSaveDesc(dealGroup)} className="bg-blue-500 text-white text-[10px] px-3 py-1.5 rounded font-bold">บันทึกเนื้อหา</button>
+                                                                            <button onClick={() => setEditingDescId(null)} className="bg-gray-200 text-gray-700 text-[10px] px-3 py-1.5 rounded font-bold">ยกเลิก</button>
+                                                                        </div>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="mt-2 text-xs text-gray-600 border-l-2 border-orange-200 pl-2 cursor-pointer hover:bg-orange-50 p-1 rounded group transition-colors"
+                                                                        onClick={() => { setEditingDescId(dealGroup.id); setNewDesc(dealGroup.description || ''); }}>
+                                                                        {dealGroup.description
+                                                                            ? <span className="line-clamp-2">{dealGroup.description} <span className="opacity-0 group-hover:opacity-100 transition-opacity text-orange-500 ml-1">✎</span></span>
+                                                                            : <span className="text-orange-400 font-medium italic">+ เพิ่มรายละเอียดสินค้า ✎</span>}
+                                                                    </div>
+                                                                )
+                                                            ) : (
+                                                                dealGroup.description && (
+                                                                    <div className="mt-2 text-xs text-gray-600 border-l-2 border-gray-200 pl-2 p-1 line-clamp-2">{dealGroup.description}</div>
+                                                                )
+                                                            )}
                                                         </td>
-                                                    )}
-                                                </tr>
+                                                        {adminTab !== 'manage' && (
+                                                            <>
+                                                                <td className="p-4 text-right">
+                                                                    <div className="text-sm font-bold text-orange-600">
+                                                                        {dealGroup.lowestPpu === dealGroup.highestPpu
+                                                                            ? `฿${dealGroup.lowestPpu?.toFixed(2)}`
+                                                                            : `฿${dealGroup.lowestPpu?.toFixed(2)} - ฿${dealGroup.highestPpu?.toFixed(2)}`}
+                                                                    </div>
+                                                                    <div className="text-[10px] text-gray-500 mt-1">ต่อ {dealGroup.unitType}</div>
+                                                                </td>
+                                                                <td className="p-4">
+                                                                    <div className="text-xs text-gray-600 font-bold bg-gray-100 px-2 py-1 rounded inline-block mt-1">
+                                                                        {dealGroup.postsCount} โพสต์/ร้าน
+                                                                    </div>
+                                                                </td>
+                                                            </>
+                                                        )}
+                                                        {adminTab === 'manage' && (
+                                                            <td className="p-4">
+                                                                {editingId === dealGroup.id ? (
+                                                                    <div className="flex flex-col gap-2">
+                                                                        <input type="text" value={newImageUrl} onChange={e => setNewImageUrl(e.target.value)}
+                                                                            placeholder="วางลิงก์รูปภาพ..." autoFocus
+                                                                            className="w-full text-xs p-2 border border-gray-300 rounded focus:border-orange-500 focus:outline-none" />
+                                                                        <div className="flex gap-2">
+                                                                            <button onClick={() => handleSaveImage(dealGroup)} className="flex-1 bg-green-500 text-white text-xs font-bold py-1.5 rounded hover:bg-green-600 flex justify-center items-center gap-1 shadow-sm"><Save size={12} /> บันทึก</button>
+                                                                            <button onClick={() => setEditingId(null)} className="flex-1 bg-gray-200 text-gray-700 text-xs font-bold py-1.5 rounded flex justify-center items-center gap-1"><X size={12} /> ยกเลิก</button>
+                                                                        </div>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="flex flex-col gap-2">
+                                                                        <button onClick={() => { setEditingId(dealGroup.id); setNewImageUrl(dealGroup.masterImage || ''); }}
+                                                                            className="w-full bg-white border border-gray-300 text-gray-700 text-xs font-bold py-2 rounded shadow-sm hover:bg-gray-50 flex items-center justify-center gap-2 transition-colors">
+                                                                            <Edit2 size={14} /> แก้ไขรูปภาพรวม
+                                                                        </button>
+                                                                        {dealGroup.masterImage && isDeleteMode && (
+                                                                            <button onClick={() => handleDeleteImage(dealGroup)} className="w-full text-red-500 text-xs font-bold py-1 hover:underline">ลบรูปภาพ</button>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                        )}
 
-                                                {/* Expanded sub-table */}
-                                                {expandedGroups.includes(dealGroup.id) && (
-                                                    <tr className="bg-gray-50/50 border-b-2 border-gray-200">
-                                                        <td colSpan="6" className="p-4 pt-0">
-                                                            <div className="bg-white rounded-lg border border-gray-200 shadow-inner ml-20 p-4">
-                                                                <h4 className="text-xs font-bold text-gray-500 uppercase mb-3 text-center border-b pb-2">โพสต์แยกรายร้านค้า ({dealGroup.originalItems.length} รายการ)</h4>
-                                                                <div className="space-y-3">
-                                                                    {dealGroup.originalItems.map(item => {
-                                                                        const storeMeta = stores.find(s => s.id === item.store) || {};
-                                                                        return (
-                                                                            <div key={item.id} className="border border-gray-200 rounded-lg p-3 bg-white flex gap-3 shadow-sm hover:border-orange-200 transition-colors">
-                                                                                <a href={item.image} target="_blank" rel="noopener noreferrer"
-                                                                                    className="w-16 h-16 rounded-lg bg-gray-100 flex-shrink-0 overflow-hidden border border-gray-200 cursor-pointer hover:opacity-80 transition-opacity block">
-                                                                                    {item.image ? <img src={item.image} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-300"><ImageIcon size={20} /></div>}
-                                                                                </a>
-                                                                                <div className="flex-1 min-w-0">
-                                                                                    <div className="flex items-start justify-between gap-2">
-                                                                                        <div>
-                                                                                            <div className="font-bold text-gray-800 text-sm">{item.name}</div>
-                                                                                            {item.brand && <div className="text-[10px] text-gray-500 uppercase tracking-wider">{item.brand}</div>}
-                                                                                        </div>
-                                                                                        <div className="text-right flex-shrink-0">
-                                                                                            <div className="font-bold text-orange-600 text-sm">฿{item.price}</div>
-                                                                                            <div className="text-[10px] text-gray-400">{item.unitQuantity || 1} {item.unitType || 'ชิ้น'}</div>
-                                                                                        </div>
-                                                                                    </div>
+                                                        {/* ── FIX: dedicated expand/collapse button for manage tab ── */}
+                                                        {adminTab === 'manage' && (
+                                                            <td className="p-4 text-center">
+                                                                <button
+                                                                    onClick={() => toggleExpand(dealGroup.id)}
+                                                                    className={`inline-flex flex-col items-center gap-1 px-3 py-2 rounded-lg border font-bold text-[10px] transition-all ${isExpanded
+                                                                            ? 'bg-blue-500 text-white border-blue-500 shadow-md'
+                                                                            : 'bg-white text-blue-600 border-blue-200 hover:bg-blue-50'
+                                                                        }`}
+                                                                    title={isExpanded ? 'ย่อรายการ' : 'ขยายดูโพสต์ทั้งหมด'}
+                                                                >
+                                                                    {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                                                    <span>{dealGroup.postsCount} โพสต์</span>
+                                                                </button>
+                                                            </td>
+                                                        )}
 
-                                                                                    {/* Store row — shows logo thumbnail */}
-                                                                                    <div className="mt-2 flex items-center gap-2">
-                                                                                        <StoreLogo logoUrl={storeMeta.logoUrl} storeName={item.store} size="xs" />
-                                                                                        {adminTab === 'manage' ? (
+                                                        {adminTab === 'manage' && isDeleteMode && (
+                                                            <td className="p-4 text-center">
+                                                                <button onClick={e => { e.stopPropagation(); handleDeleteGroup(dealGroup); }}
+                                                                    className="text-white bg-red-500 hover:bg-red-600 p-2 rounded-full shadow-sm transition-colors" title="ลบกลุ่มสินค้านี้">
+                                                                    <Trash2 size={16} />
+                                                                </button>
+                                                            </td>
+                                                        )}
+                                                    </tr>
+
+                                                    {/* Expanded sub-table */}
+                                                    {isExpanded && (
+                                                        <tr className="bg-blue-50/30 border-b-2 border-blue-100">
+                                                            <td colSpan={getExpandedColSpan()} className="p-4 pt-2">
+                                                                <div className="bg-white rounded-xl border border-blue-100 shadow-inner ml-20 p-4">
+                                                                    <div className="flex items-center justify-between mb-3 border-b border-gray-100 pb-2">
+                                                                        <h4 className="text-xs font-bold text-gray-500 uppercase">
+                                                                            โพสต์แยกรายร้านค้า ({dealGroup.originalItems.length} รายการ)
+                                                                            {isDeleteMode && <span className="ml-2 text-red-500 normal-case font-normal">— คลิก "ลบโพสต์" เพื่อลบแต่ละรายการ</span>}
+                                                                        </h4>
+                                                                        <button onClick={() => toggleExpand(dealGroup.id)}
+                                                                            className="text-[10px] text-gray-400 hover:text-gray-600 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 transition-colors">
+                                                                            <X size={12} /> ปิด
+                                                                        </button>
+                                                                    </div>
+                                                                    <div className="space-y-3">
+                                                                        {dealGroup.originalItems.map(item => {
+                                                                            const storeMeta = stores.find(s => s.id === item.store) || {};
+                                                                            return (
+                                                                                <div key={item.id} className={`border rounded-lg p-3 bg-white flex gap-3 shadow-sm transition-colors ${isDeleteMode ? 'border-red-100 hover:border-red-300' : 'border-gray-200 hover:border-orange-200'}`}>
+                                                                                    <a href={item.image} target="_blank" rel="noopener noreferrer"
+                                                                                        className="w-16 h-16 rounded-lg bg-gray-100 flex-shrink-0 overflow-hidden border border-gray-200 cursor-pointer hover:opacity-80 transition-opacity block">
+                                                                                        {item.image ? <img src={item.image} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-300"><ImageIcon size={20} /></div>}
+                                                                                    </a>
+                                                                                    <div className="flex-1 min-w-0">
+                                                                                        <div className="flex items-start justify-between gap-2">
+                                                                                            <div>
+                                                                                                <div className="font-bold text-gray-800 text-sm">{item.name}</div>
+                                                                                                {item.brand && <div className="text-[10px] text-gray-500 uppercase tracking-wider">{item.brand}</div>}
+                                                                                            </div>
+                                                                                            <div className="text-right flex-shrink-0">
+                                                                                                <div className="font-bold text-orange-600 text-sm">฿{item.price}</div>
+                                                                                                <div className="text-[10px] text-gray-400">{item.unitQuantity || 1} {item.unitType || 'ชิ้น'}</div>
+                                                                                            </div>
+                                                                                        </div>
+
+                                                                                        {/* Store row */}
+                                                                                        <div className="mt-2 flex items-center gap-2">
+                                                                                            <StoreLogo logoUrl={storeMeta.logoUrl} storeName={item.store} size="xs" />
                                                                                             <div className="flex-1">
                                                                                                 {editingStoreItemId === item.id ? (
                                                                                                     <div className="flex items-center gap-1">
@@ -914,24 +1081,18 @@
                                                                                                     </span>
                                                                                                 )}
                                                                                             </div>
-                                                                                        ) : (
-                                                                                            <span className="text-xs text-gray-800">{item.store || 'ไม่ระบุร้าน'}</span>
-                                                                                        )}
-                                                                                    </div>
+                                                                                        </div>
 
-                                                                                    {/* Tags */}
-                                                                                    <div className="mt-2 flex flex-wrap items-center gap-1">
-                                                                                        <Tag size={10} className="text-gray-400" />
-                                                                                        {(item.tags && item.tags.length > 0) ? item.tags.map(tag => (
-                                                                                            <span key={tag} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[9px] flex items-center gap-1 group">
-                                                                                                #{tag}
-                                                                                                {adminTab === 'manage' && (
+                                                                                        {/* Tags */}
+                                                                                        <div className="mt-2 flex flex-wrap items-center gap-1">
+                                                                                            <Tag size={10} className="text-gray-400" />
+                                                                                            {(item.tags && item.tags.length > 0) ? item.tags.map(tag => (
+                                                                                                <span key={tag} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[9px] flex items-center gap-1 group">
+                                                                                                    #{tag}
                                                                                                     <button onClick={() => handleRemoveTag(item.id, item.tags, tag)} className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity"><X size={8} /></button>
-                                                                                                )}
-                                                                                            </span>
-                                                                                        )) : <span className="text-[9px] text-gray-300 italic">ไม่มีแท็ก</span>}
-                                                                                        {adminTab === 'manage' && (
-                                                                                            adminTagItemId === item.id ? (
+                                                                                                </span>
+                                                                                            )) : <span className="text-[9px] text-gray-300 italic">ไม่มีแท็ก</span>}
+                                                                                            {adminTagItemId === item.id ? (
                                                                                                 <div className="flex items-center gap-1">
                                                                                                     <input type="text" value={adminTagValue} onChange={e => setAdminTagValue(e.target.value)}
                                                                                                         onKeyDown={e => { if (e.key === 'Enter') handleAddAdminTag(item.id, item.tags); }}
@@ -942,19 +1103,17 @@
                                                                                                 </div>
                                                                                             ) : (
                                                                                                 <button onClick={() => setAdminTagItemId(item.id)} className="text-[9px] text-orange-500 hover:text-orange-700 font-bold px-1">+ เพิ่มแท็ก</button>
-                                                                                            )
-                                                                                        )}
-                                                                                    </div>
-
-                                                                                    <div className="mt-1 flex flex-wrap items-center justify-between text-[10px] text-gray-400">
-                                                                                        <div className="flex gap-2">
-                                                                                            <span>{item.lastUpdated ? new Date(item.lastUpdated).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}</span>
-                                                                                            {item.shippingType === 'excluded' && item.shippingFee > 0 && <span className="text-blue-500">+ค่าส่ง ฿{item.shippingFee}</span>}
-                                                                                            {item.cashbackUsed && <span className="text-green-600">cashback ฿{item.cashbackAmount}</span>}
-                                                                                            {item.promoCodeUsed && item.promoCode && <span className="text-blue-600">promo: {item.promoCode}</span>}
+                                                                                            )}
                                                                                         </div>
-                                                                                        {adminTab === 'manage' && (
-                                                                                            <div className="flex gap-2 relative">
+
+                                                                                        <div className="mt-1 flex flex-wrap items-center justify-between text-[10px] text-gray-400">
+                                                                                            <div className="flex gap-2">
+                                                                                                <span>{item.lastUpdated ? new Date(item.lastUpdated).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}</span>
+                                                                                                {item.shippingType === 'excluded' && item.shippingFee > 0 && <span className="text-blue-500">+ค่าส่ง ฿{item.shippingFee}</span>}
+                                                                                                {item.cashbackUsed && <span className="text-green-600">cashback ฿{item.cashbackAmount}</span>}
+                                                                                                {item.promoCodeUsed && item.promoCode && <span className="text-blue-600">promo: {item.promoCode}</span>}
+                                                                                            </div>
+                                                                                            <div className="flex gap-2 relative items-center">
                                                                                                 {moveItemId === item.id ? (
                                                                                                     <div className="absolute right-full mr-2 bg-white shadow-lg border border-gray-200 rounded p-1 flex items-center gap-1 z-10 whitespace-nowrap">
                                                                                                         <select value={moveTargetName} onChange={e => setMoveTargetName(e.target.value)}
@@ -962,7 +1121,7 @@
                                                                                                             <option value="">-- ปลายทาง --</option>
                                                                                                             {uniqueProductNames.filter(n => n !== item.name).map(n => <option key={n} value={n}>{n}</option>)}
                                                                                                         </select>
-                                                                                                        <button onClick={() => handleMoveItem(item.id)} className="bg-blue-500 text-white text-[10px] px-1.5 py-1 rounded font-bold"><ArrowRight size={10} /> ย้าย</button>
+                                                                                                        <button onClick={() => handleMoveItem(item.id)} className="bg-blue-500 text-white text-[10px] px-1.5 py-1 rounded font-bold flex items-center gap-0.5"><ArrowRight size={10} /> ย้าย</button>
                                                                                                         <button onClick={() => { setMoveItemId(null); setMoveTargetName(''); }} className="bg-gray-200 text-gray-600 text-[10px] px-1.5 py-1 rounded">ปิด</button>
                                                                                                     </div>
                                                                                                 ) : (
@@ -970,23 +1129,28 @@
                                                                                                         <ArrowRight size={10} /> ย้ายกลุ่ม
                                                                                                     </button>
                                                                                                 )}
+                                                                                                {/* ── FIX: delete post button always visible when delete mode ON ── */}
                                                                                                 {isDeleteMode && (
-                                                                                                    <button onClick={() => handleDeletePost(item.id)} className="text-[10px] text-red-500 hover:text-white hover:bg-red-500 border border-red-500 px-1.5 py-0.5 rounded transition-colors">ลบโพสต์</button>
+                                                                                                    <button
+                                                                                                        onClick={() => handleDeletePost(item.id, item.name)}
+                                                                                                        className="text-[10px] text-white bg-red-500 hover:bg-red-600 border border-red-500 px-2 py-1 rounded font-bold flex items-center gap-1 transition-colors shadow-sm">
+                                                                                                        <Trash2 size={10} /> ลบโพสต์
+                                                                                                    </button>
                                                                                                 )}
                                                                                             </div>
-                                                                                        )}
+                                                                                        </div>
                                                                                     </div>
                                                                                 </div>
-                                                                            </div>
-                                                                        );
-                                                                    })}
+                                                                            );
+                                                                        })}
+                                                                    </div>
                                                                 </div>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                )}
-                                            </React.Fragment>
-                                        ))}
+                                                            </td>
+                                                        </tr>
+                                                    )}
+                                                </React.Fragment>
+                                            );
+                                        })}
                                     </tbody>
                                 </table>
                             </div>
@@ -1029,7 +1193,6 @@
                                                                 <div className="text-[10px] text-gray-400">{item.unitQuantity || 1} {item.unitType || 'ชิ้น'}</div>
                                                             </div>
                                                         </div>
-                                                        {/* Store with logo */}
                                                         <div className="mt-2 flex items-center gap-2">
                                                             <StoreLogo logoUrl={storeMeta.logoUrl} storeName={item.store} size="xs" />
                                                             {editingStoreItemId === item.id ? (
@@ -1058,7 +1221,6 @@
                                                                 </span>
                                                             )}
                                                         </div>
-                                                        {/* Tags */}
                                                         <div className="mt-2 flex flex-wrap items-center gap-1">
                                                             <Tag size={10} className="text-gray-400" />
                                                             {(item.tags && item.tags.length > 0) ? item.tags.map(tag => (
@@ -1256,6 +1418,57 @@
                                     <div className="p-4 bg-slate-50 border-t border-gray-100 flex justify-end gap-3">
                                         <button onClick={() => setShowMergeModal(false)} className="px-6 py-2.5 rounded-lg text-gray-600 font-bold hover:bg-gray-200">ยกเลิก</button>
                                         <button onClick={handleMergeConfirm} className="px-6 py-2.5 rounded-lg bg-orange-600 text-white font-bold shadow-md hover:bg-orange-700 flex items-center gap-2"><Save size={18} /> ยืนยันการรวมข้อมูล</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Relate Store modal */}
+                        {relatingStore && (
+                            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-fade-in">
+                                <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+                                    <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-blue-50">
+                                        <h2 className="text-xl font-bold flex items-center gap-2 text-blue-700"><Link2 className="text-blue-500" /> เชื่อมร้านค้า</h2>
+                                        <button onClick={() => { setRelatingStore(null); setRelateSearchQuery(''); }} className="text-gray-400 hover:text-gray-600"><X size={24} /></button>
+                                    </div>
+                                    <div className="p-6 overflow-y-auto flex-1 flex flex-col gap-4">
+                                        <div className="text-sm text-gray-600">
+                                            เลือกชื่อร้านหลักสำหรับ <strong className="text-red-500 font-bold px-1 py-0.5 bg-red-50 rounded">"{relatingStore}"</strong>
+                                            <p className="text-xs text-gray-500 mt-1">สินค้าทั้งหมดจะถูกย้ายไปร้านใหม่ และบันทึกชื่อนี้เป็นนามแฝง (Alias)</p>
+                                        </div>
+                                        <div className="relative">
+                                            <input type="text" placeholder="ค้นหาร้านค้าที่ถูกต้อง..." value={relateSearchQuery}
+                                                onChange={(e) => setRelateSearchQuery(e.target.value)} autoFocus
+                                                className="w-full py-3 pl-10 pr-4 bg-gray-50 border-2 border-transparent focus:border-blue-500 rounded-xl text-sm font-semibold text-gray-800 outline-none transition-all" />
+                                            <Search className="absolute left-3 top-3.5 text-gray-400" size={18} />
+                                        </div>
+                                        <div className="flex-1 overflow-y-auto min-h-[200px] border border-gray-100 rounded-xl divide-y divide-gray-50">
+                                            {allStoreNames.filter(s => s !== relatingStore && s.toLowerCase().includes(relateSearchQuery.toLowerCase()))
+                                                .map(targetStore => {
+                                                    const meta = stores.find(s => s.id === targetStore) || {};
+                                                    return (
+                                                        <div key={targetStore} className="flex items-center justify-between p-3 hover:bg-blue-50 transition-colors">
+                                                            <div className="flex items-center gap-3">
+                                                                <StoreLogo logoUrl={meta.logoUrl} storeName={targetStore} size="sm" />
+                                                                <div>
+                                                                    <div className="font-bold text-gray-800 text-sm flex items-center gap-2">
+                                                                        {targetStore}
+                                                                        {meta.isFamous && <span className="text-[10px] bg-orange-500 text-white px-1.5 py-0.5 rounded-sm">★</span>}
+                                                                    </div>
+                                                                    {meta.province && <div className="text-[10px] text-gray-400">{meta.province}</div>}
+                                                                </div>
+                                                            </div>
+                                                            <button onClick={() => { handleRelateStore(relatingStore, targetStore); setRelateSearchQuery(''); }}
+                                                                className="px-4 py-1.5 bg-white border border-blue-200 text-blue-600 font-bold text-xs rounded-lg hover:bg-blue-500 hover:text-white transition-colors shadow-sm">
+                                                                เชื่อมไปร้านนี้
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                })}
+                                            {allStoreNames.filter(s => s !== relatingStore && s.toLowerCase().includes(relateSearchQuery.toLowerCase())).length === 0 && (
+                                                <div className="text-center text-gray-400 py-8 text-sm italic">ไม่พบร้านค้าที่ค้นหา</div>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
