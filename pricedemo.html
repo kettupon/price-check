@@ -12,28 +12,14 @@
                 extend: {
                     colors: {
                         green: {
-                            50: '#f0f9eb',
-                            100: '#dbf2ce',
-                            200: '#bae6a1',
-                            300: '#92d571',
-                            400: '#6dc147',
-                            500: '#48A111',
-                            600: '#387e0d',
-                            700: '#2c610b',
-                            800: '#214709',
-                            900: '#183107',
+                            50: '#f0f9eb', 100: '#dbf2ce', 200: '#bae6a1', 300: '#92d571',
+                            400: '#6dc147', 500: '#48A111', 600: '#387e0d', 700: '#2c610b',
+                            800: '#214709', 900: '#183107',
                         },
                         orange: {
-                            50: '#fffcf1',
-                            100: '#fff6db',
-                            200: '#ffebb5',
-                            300: '#ffdc89',
-                            400: '#ffbd45',
-                            500: '#FF8C00',
-                            600: '#e67300',
-                            700: '#bf5700',
-                            800: '#994000',
-                            900: '#7d3300',
+                            50: '#fffcf1', 100: '#fff6db', 200: '#ffebb5', 300: '#ffdc89',
+                            400: '#ffbd45', 500: '#FF8C00', 600: '#e67300', 700: '#bf5700',
+                            800: '#994000', 900: '#7d3300',
                         }
                     }
                 }
@@ -83,7 +69,8 @@
           "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
           "lucide-react": "https://esm.sh/lucide-react@0.294.0",
           "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
-          "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"
+          "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js",
+          "firebase/auth": "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js"
         }
       }
     </script>
@@ -94,15 +81,17 @@
     <div id="root"></div>
 
     <script type="text/babel" data-type="module">
-        import React, { useState, useEffect, useRef } from 'react';
+        import React, { useState, useEffect, useRef, useMemo } from 'react';
         import { createRoot } from 'react-dom/client';
         import {
             MapPin, Users, Tag, AlertCircle, Plus, Trophy, Heart, MessageSquare,
-            Share2, Search, Zap, Home, ListPlus, Calculator, ChevronLeft, Image as ImageIcon,
-            Coffee, ShoppingCart, Store, Package, User, X, ShoppingBag, ImageOff, Camera, FileText
+            Share2, Search, Zap, Home, ListPlus, Calculator, ChevronLeft, ChevronRight, Image as ImageIcon,
+            Coffee, ShoppingCart, Store, Package, User, X, ShoppingBag, ImageOff, Camera, FileText,
+            Grid, Folder, Bell
         } from 'lucide-react';
         import { initializeApp } from 'firebase/app';
         import { getFirestore, collection, addDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
+        import { getAuth, signInWithPopup, GoogleAuthProvider, signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth';
 
         const firebaseConfig = {
             apiKey: "AIzaSyByDvi-wyekFdKMiMv_Cb2yUq9yF0Tw3Uc",
@@ -114,23 +103,83 @@
         };
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
+        const auth = getAuth(app);
+        const googleProvider = new GoogleAuthProvider();
 
         function App() {
-            const [currentView, setCurrentView] = useState('feed'); // 'feed' | 'search' | 'add' | 'profile' | 'product_detail' | 'store_detail'
-            const [activeTab, setActiveTab] = useState('ทั้งหมด');
+            const [currentView, setCurrentView] = useState('feed');
             const [showShippingInFeed, setShowShippingInFeed] = useState(false);
             const [profileTab, setProfileTab] = useState('posts');
+            const [adminNews, setAdminNews] = useState([]); // ── NEW: admin news from Firebase
+            const [viewedNewsIds, setViewedNewsIds] = useState([]); // ── NEW: track viewed news
+            const [unreadAdminNewsCount, setUnreadAdminNewsCount] = useState(0); // ── NEW: count of unread admin news
             const [showConfirmModal, setShowConfirmModal] = useState(false);
             const [deals, setDeals] = useState([]);
             const [groupedDeals, setGroupedDeals] = useState([]);
             const [searchQuery, setSearchQuery] = useState('');
             const [selectedProduct, setSelectedProduct] = useState(null);
+            const [showAllVariants, setShowAllVariants] = useState(false);
             const [zoomedImage, setZoomedImage] = useState(null);
+
+            // ── NEW: active category filter for search page ──
+            const [activeCategoryFilter, setActiveCategoryFilter] = useState(null); // null = all
+
+            const uniqueProductsWithBrand = useMemo(() => {
+                const map = new Map();
+                deals.forEach(d => {
+                    if (!map.has(d.name)) map.set(d.name, d.brand || '');
+                });
+                return Array.from(map.entries()).map(([name, brand]) => ({ name, brand })).sort((a, b) => a.name.localeCompare(b.name, 'th'));
+            }, [deals]);
+
             const [stores, setStores] = useState([]);
             const [selectedStore, setSelectedStore] = useState(null);
-            const [selectedStoreForDetail, setSelectedStoreForDetail] = useState(null); // For store_detail view
+            const [selectedStoreForDetail, setSelectedStoreForDetail] = useState(null);
             const [storeSearchQuery, setStoreSearchQuery] = useState('');
+            const [selectedBrandForDetail, setSelectedBrandForDetail] = useState(null);
+            const [brandSearchQuery, setBrandSearchQuery] = useState('');
             const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
+            const [variantGroups, setVariantGroups] = useState([]);
+            const [categories, setCategories] = useState([]); // ── NEW: real categories from Firestore
+            const [isItemLocked, setIsItemLocked] = useState(false); // ── NEW: lock name/brand/unit for reporting existing items
+
+            // Auth State
+            const [currentUser, setCurrentUser] = useState(null);
+            const [authLoading, setAuthLoading] = useState(true);
+            const [showLoginModal, setShowLoginModal] = useState(false);
+
+            // Report State
+            const [showReportModal, setShowReportModal] = useState(false);
+            const [reportText, setReportText] = useState('');
+            const [reportImages, setReportImages] = useState([]);
+            const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+
+            useEffect(() => {
+                const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+                    setCurrentUser(user);
+                    setAuthLoading(false);
+                });
+                return () => unsubscribeAuth();
+            }, []);
+
+            const handleGoogleLogin = async () => {
+                try { await signInWithPopup(auth, googleProvider); setShowLoginModal(false); }
+                catch (error) { alert('เกิดข้อผิดพลาดในการเข้าสู่ระบบด้วย Google'); }
+            };
+
+            const handleGuestLogin = async () => {
+                try { await signInAnonymously(auth); setShowLoginModal(false); }
+                catch (error) { alert('เกิดข้อผิดพลาดในการเข้าสู่ระบบ'); }
+            };
+
+            const handleLogout = async () => {
+                try { await signOut(auth); } catch (error) { console.error('Logout error:', error); }
+            };
+
+            const isGuestUser = currentUser?.isAnonymous === true;
+            const isLoggedIn = currentUser !== null;
+            const userDisplayName = currentUser?.displayName || (isGuestUser ? 'ผู้เยี่ยมชม (Guest)' : 'ผู้ใช้');
+            const userPhotoURL = currentUser?.photoURL || null;
 
             const ImagePlaceholder = () => (
                 <div className="w-full h-full flex flex-col items-center justify-center bg-gray-100/80 text-gray-400">
@@ -139,8 +188,6 @@
                 </div>
             );
 
-            // StoreLogo: shows logo image if available, otherwise falls back to Store icon
-            // Uses object-contain so any aspect ratio (square, landscape, portrait) renders correctly
             const StoreLogo = ({ storeId, size = 'sm' }) => {
                 const meta = stores.find(s => s.id === storeId);
                 const logoUrl = meta?.logoUrl;
@@ -153,9 +200,7 @@
                         <div className={`${box} rounded-lg bg-white border border-gray-100 flex items-center justify-center overflow-hidden flex-shrink-0 shadow-sm`}>
                             <img src={logoUrl} alt={storeId} className="w-full h-full object-contain p-0.5"
                                 onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }} />
-                            <div style={{ display: 'none' }} className="w-full h-full items-center justify-center text-orange-400">
-                                <Store size={iconSz} />
-                            </div>
+                            <div style={{ display: 'none' }} className="w-full h-full items-center justify-center text-orange-400"><Store size={iconSz} /></div>
                         </div>
                     );
                 }
@@ -166,9 +211,11 @@
                 );
             };
 
-            // --- Store alias resolution ---
+            // Store alias resolution
             const storeAliasMap = {};
             stores.forEach(s => {
+                // Map ID itself (case-insensitive) to official ID for consistency
+                storeAliasMap[s.id.toLowerCase().trim()] = s.id;
                 if (s.aliases && s.aliases.length > 0) {
                     s.aliases.forEach(alias => { storeAliasMap[alias.toLowerCase().trim()] = s.id; });
                 }
@@ -178,7 +225,12 @@
                 return storeAliasMap[name.toLowerCase().trim()] || name.trim();
             };
 
-            // --- Firebase Fetch ---
+            // ── Helper: get categories for a product name ──
+            const getCategoriesForProduct = (productName) => {
+                return categories.filter(c => (c.items || []).includes(productName)).map(c => c.name);
+            };
+
+            // Firebase Fetch
             useEffect(() => {
                 const q = query(collection(db, "items"), orderBy("lastUpdated", "desc"));
                 const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -193,31 +245,22 @@
                             const ppu = totalPrice / unitQty;
                             const shipFee = (data.shippingType === 'excluded') ? (parseFloat(data.shippingFee) || 0) : 0;
                             const ppuWithShipping = (totalPrice + shipFee) / unitQty;
-
                             return {
-                                id: doc.id,
-                                name: data.name,
-                                brand: data.brand || "",
-                                price: data.price,
-                                ppu: ppu,
-                                ppuWithShipping: ppuWithShipping,
-                                totalPrice: totalPrice,
-                                unitQuantity: unitQty,
-                                unitType: data.unitType || "ชิ้น",
+                                id: doc.id, name: data.name, brand: data.brand || "",
+                                price: data.price, ppu, ppuWithShipping, totalPrice,
+                                unitQuantity: unitQty, unitType: data.unitType || "ชิ้น",
                                 normalPrice: Math.round(data.price * 1.2),
-                                shop: data.store || "ไม่ระบุร้าน",
-                                distance: "? km",
+                                shop: data.store || "ไม่ระบุร้าน", distance: "? km",
                                 masterImage: data.masterImage || "",
                                 stickers: ppu < 10 ? ["🔥 คุ้มสุด!"] : [],
-                                likes: 0,
-                                comments: 0,
-                                image: data.image || "",
+                                likes: 0, comments: 0, image: data.image || "",
                                 timePosted: new Date(data.lastUpdated).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }),
                                 reporter: "Live User",
                                 cashbackUsed: data.cashbackUsed || false,
                                 tags: data.tags || [],
                                 shippingType: data.shippingType || 'included',
                                 shippingFee: data.shippingFee || 0,
+                                isMemberPrice: data.isMemberPrice || false,
                                 description: data.description || ""
                             };
                         });
@@ -228,19 +271,13 @@
                         const name = deal.name || 'Unknown';
                         if (!grouped[name]) {
                             grouped[name] = {
-                                id: deal.id,
-                                name: name,
-                                brand: deal.brand,
+                                id: deal.id, name, brand: deal.brand,
                                 masterImage: deal.masterImage || deal.image,
-                                lowestPrice: deal.price,
-                                lowestPpu: deal.ppu,
+                                lowestPrice: deal.price, lowestPpu: deal.ppu,
                                 lowestPpuWithShipping: deal.ppuWithShipping,
-                                lowestPpuUnit: deal.unitType,
-                                normalPrice: deal.normalPrice,
-                                postsCount: 1,
-                                stickers: deal.stickers,
-                                tags: [...deal.tags],
-                                description: deal.description || ""
+                                lowestPpuUnit: deal.unitType, normalPrice: deal.normalPrice,
+                                postsCount: 1, stickers: deal.stickers,
+                                tags: [...deal.tags], description: deal.description || ""
                             };
                         } else {
                             grouped[name].postsCount += 1;
@@ -250,36 +287,49 @@
                             if (deal.masterImage && (!grouped[name].masterImage || grouped[name].masterImage === grouped[name].image)) {
                                 grouped[name].masterImage = deal.masterImage;
                             }
-                            if (deal.description && !grouped[name].description) {
-                                grouped[name].description = deal.description;
-                            }
+                            if (deal.description && !grouped[name].description) grouped[name].description = deal.description;
                             if (deal.tags && deal.tags.length > 0) {
-                                deal.tags.forEach(tag => {
-                                    if (!grouped[name].tags.includes(tag)) {
-                                        grouped[name].tags.push(tag);
-                                    }
-                                });
+                                deal.tags.forEach(tag => { if (!grouped[name].tags.includes(tag)) grouped[name].tags.push(tag); });
                             }
                         }
                     });
                     setGroupedDeals(Object.values(grouped));
                 });
 
-                const storesUnsubscribe = onSnapshot(collection(db, "stores"), (snapshot) => {
-                    const fbStores = snapshot.docs.map(doc => ({
-                        id: doc.id,
-                        ...doc.data()
-                    }));
-                    setStores(fbStores);
+                const storesUnsub = onSnapshot(collection(db, "stores"), (snapshot) => {
+                    setStores(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
                 });
 
-                return () => {
-                    unsubscribe();
-                    storesUnsubscribe();
-                };
+                const variantsUnsub = onSnapshot(collection(db, "variantGroups"), (snapshot) => {
+                    setVariantGroups(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                });
+
+                // ── NEW: listen to categories ──
+                const categoriesUnsub = onSnapshot(collection(db, "categories"), (snapshot) => {
+                    setCategories(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                });
+
+                return () => { unsubscribe(); storesUnsub(); variantsUnsub(); categoriesUnsub(); };
             }, []);
 
-            // --- Add Deal Form State ---
+            // ── Fetch Admin News from Firebase ──
+            useEffect(() => {
+                const newsQuery = query(collection(db, "adminNews"), orderBy("createdAt", "desc"));
+                const newsUnsub = onSnapshot(newsQuery, (snapshot) => {
+                    const newsItems = snapshot.docs.map(doc => ({
+                        id: doc.id,
+                        text: doc.data().text,
+                        createdAt: doc.data().createdAt || new Date()
+                    }));
+                    setAdminNews(newsItems);
+                    // Update unread count: unread = total - viewed
+                    const unreadCount = newsItems.filter(n => !viewedNewsIds.includes(n.id)).length;
+                    setUnreadAdminNewsCount(unreadCount);
+                });
+                return () => newsUnsub();
+            }, [viewedNewsIds]);
+
+            // Add Deal Form State
             const [itemName, setItemName] = useState('');
             const [brand, setBrand] = useState('');
             const [store, setStore] = useState('');
@@ -296,6 +346,7 @@
             const [useCashback, setUseCashback] = useState(false);
             const [cashbackAmount, setCashbackAmount] = useState('');
             const [includeShippingInPpu, setIncludeShippingInPpu] = useState(false);
+            const [isMemberPrice, setIsMemberPrice] = useState(false);
             const [imageBase64, setImageBase64] = useState(null);
             const fileInputRef = useRef(null);
 
@@ -322,6 +373,58 @@
                 reader.readAsDataURL(file);
             };
 
+            const handleReportImageUpload = (e) => {
+                const files = Array.from(e.target.files);
+                if (!files.length) return;
+                const remainingSlots = 2 - reportImages.length;
+                const filesToProcess = files.slice(0, remainingSlots);
+                if (files.length > remainingSlots) alert('สามารถอัปโหลดได้สูงสุด 2 รูปเท่านั้น');
+                filesToProcess.forEach(file => {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        const img = new window.Image();
+                        img.onload = () => {
+                            const maxSize = 800;
+                            let w = img.width, h = img.height;
+                            if (w > maxSize || h > maxSize) {
+                                if (w > h) { h = Math.round(h * maxSize / w); w = maxSize; }
+                                else { w = Math.round(w * maxSize / h); h = maxSize; }
+                            }
+                            const canvas = document.createElement('canvas');
+                            canvas.width = w; canvas.height = h;
+                            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                            setReportImages(prev => [...prev, canvas.toDataURL('image/jpeg', 0.7)]);
+                        };
+                        img.src = event.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                });
+            };
+
+            const handleSubmitReport = async () => {
+                if (!reportText.trim() && reportImages.length === 0) {
+                    alert('กรุณากรอกข้อความหรือแนบรูปภาพรายงานปัญหา');
+                    return;
+                }
+                setIsSubmittingReport(true);
+                try {
+                    await addDoc(collection(db, "reports"), {
+                        text: reportText.trim(), images: reportImages,
+                        userId: currentUser?.uid || 'guest', userDisplayName,
+                        createdAt: Date.now(), status: 'pending',
+                        itemId: selectedProduct?.id || null,
+                        itemUnitQty: selectedProduct?.unitQuantity || 1,
+                        itemUnitType: selectedProduct?.unitType || 'ชิ้น'
+                    });
+                    alert('ส่งรายงานปัญหาเรียบร้อยแล้ว ขอบคุณสำหรับข้อมูลครับ');
+                    setShowReportModal(false); setReportText(''); setReportImages([]);
+                } catch (error) {
+                    alert('เกิดข้อผิดพลาดในการส่งรายงาน กรุณาลองใหม่อีกครั้ง');
+                } finally {
+                    setIsSubmittingReport(false);
+                }
+            };
+
             const numPrice = parseFloat(price) || 0;
             const numCashback = useCashback ? (parseFloat(cashbackAmount) || 0) : 0;
             const addedShipping = (shippingType === 'excluded' && includeShippingInPpu) ? (parseFloat(shippingFee) || 0) : 0;
@@ -332,96 +435,141 @@
                 if (e.key === 'Enter' || e.key === ',') {
                     e.preventDefault();
                     const val = tagInput.trim().replace(',', '').toLowerCase();
-                    if (val && !tags.includes(val) && tags.length < 5) {
-                        setTags([...tags, val]);
-                    }
+                    if (val && !tags.includes(val) && tags.length < 5) setTags([...tags, val]);
                     setTagInput('');
                 }
             };
-            const removeTag = (tagToRemove) => {
-                setTags(tags.filter(t => t !== tagToRemove));
-            };
+            const removeTag = (tagToRemove) => setTags(tags.filter(t => t !== tagToRemove));
 
             const handleSaveDeal = () => {
-                if (!itemName || !price) {
-                    alert('กรุณากรอกชื่อสินค้าและราคา');
-                    return;
-                }
+                if (!itemName || !price) { alert('กรุณากรอกชื่อสินค้าและราคา'); return; }
+                if (!store || !store.trim()) { alert('กรุณาเลือกหรือระบุชื่อร้านค้า'); return; }
                 setShowConfirmModal(true);
             };
 
             const executeSaveDeal = async () => {
                 try {
                     await addDoc(collection(db, "items"), {
-                        name: itemName,
-                        brand: brand,
-                        store: resolveStoreName(store),
-                        price: parseFloat(price),
-                        unitQuantity: parseInt(unit) || 1,
-                        unitType: unitType,
-                        shippingType: shippingType,
+                        name: itemName, brand, store: resolveStoreName(store),
+                        price: parseFloat(price), unitQuantity: parseInt(unit) || 1,
+                        unitType, shippingType,
                         shippingFee: shippingType === 'excluded' ? (parseFloat(shippingFee) || 0) : 0,
-                        tags: tags,
-                        promoCodeUsed: usePromo,
-                        promoCode: usePromo ? promoCode : '',
+                        tags, promoCodeUsed: usePromo, promoCode: usePromo ? promoCode : '',
                         cashbackUsed: useCashback,
                         cashbackAmount: useCashback ? (parseFloat(cashbackAmount) || 0) : 0,
-                        image: imageBase64 || '',
-                        lastUpdated: Date.now()
+                        isMemberPrice,
+                        image: imageBase64 || '', lastUpdated: Date.now()
                     });
-
                     setItemName(''); setBrand(''); setPrice(''); setUnit(1); setUnitDisplay('1'); setStore('');
                     setUseCashback(false); setCashbackAmount(''); setUsePromo(false); setPromoCode('');
+                    setIsMemberPrice(false);
                     setImageBase64(null); setTags([]); setTagInput(''); setShippingType('included');
                     setShippingFee(''); setIncludeShippingInPpu(false);
-
-                    setShowConfirmModal(false);
-                    setCurrentView('feed');
-                } catch (e) {
-                    console.error(e);
-                    alert("Error saving: " + e.message);
-                }
+                    setShowConfirmModal(false); setCurrentView('feed');
+                } catch (e) { alert("Error saving: " + e.message); }
             };
 
-            // --- Resolved deals: apply alias resolution at render time ---
             const resolvedDeals = deals.map(d => ({ ...d, shop: resolveStoreName(d.shop) }));
 
-            // --- Helper: get items for a specific store ---
-            const getStoreDeals = (storeId) => {
-                return resolvedDeals.filter(d => d.shop === storeId);
-            };
+            const getStoreDeals = (storeId) => resolvedDeals.filter(d => d.shop === storeId);
 
-            // --- Helper: compute best-ranked items for a store (compare PPU cross-store) ---
             const getStoreBestRankedItems = (storeId) => {
                 const storeDeals = resolvedDeals.filter(d => d.shop === storeId);
-
-                // For each item in this store, find the min PPU across ALL stores
-                // Then compute a "rank score" = how much cheaper vs global min PPU
                 const ranked = storeDeals.map(deal => {
                     const allSameItem = resolvedDeals.filter(d => d.name === deal.name);
                     const globalMinPpu = Math.min(...allSameItem.map(d => d.ppu));
                     const savingVsOthers = globalMinPpu > 0 ? ((deal.ppu - globalMinPpu) / globalMinPpu) : 0;
-                    // Lower savingVsOthers = better (0 means this IS the cheapest)
                     return { ...deal, globalMinPpu, savingVsOthers, isCheapestGlobal: deal.ppu <= globalMinPpu };
                 });
-
-                // Sort: first those that are globally cheapest, then by PPU ascending
                 ranked.sort((a, b) => {
                     if (a.isCheapestGlobal && !b.isCheapestGlobal) return -1;
                     if (!a.isCheapestGlobal && b.isCheapestGlobal) return 1;
                     return a.savingVsOthers - b.savingVsOthers;
                 });
-
-                // Deduplicate by name (keep best per product name)
-                const seen = new Set();
-                const deduped = [];
-                for (const d of ranked) {
-                    if (!seen.has(d.name)) {
-                        seen.add(d.name);
-                        deduped.push(d);
-                    }
-                }
+                const seen = new Set(); const deduped = [];
+                for (const d of ranked) { if (!seen.has(d.name)) { seen.add(d.name); deduped.push(d); } }
                 return deduped.slice(0, 3);
+            };
+
+            const getBrandBestRankedItems = (brandName) => {
+                const brandDeals = resolvedDeals.filter(d => d.brand === brandName);
+                const ranked = brandDeals.map(deal => {
+                    const allSameItem = resolvedDeals.filter(d => d.name === deal.name);
+                    const globalMinPpu = Math.min(...allSameItem.map(d => d.ppu));
+                    const savingVsOthers = globalMinPpu > 0 ? ((deal.ppu - globalMinPpu) / globalMinPpu) : 0;
+                    return { ...deal, globalMinPpu, savingVsOthers, isCheapestGlobal: deal.ppu <= globalMinPpu };
+                });
+                ranked.sort((a, b) => {
+                    if (a.isCheapestGlobal && !b.isCheapestGlobal) return -1;
+                    if (!a.isCheapestGlobal && b.isCheapestGlobal) return 1;
+                    return a.savingVsOthers - b.savingVsOthers;
+                });
+                const seen = new Set(); const deduped = [];
+                for (const d of ranked) { if (!seen.has(d.name)) { seen.add(d.name); deduped.push(d); } }
+                return deduped;
+            };
+
+            // ── Shared product card renderer (used in feed + search) ──
+            const renderProductCard = (deal, showCategoryBadges = false) => {
+                const hasVariants = variantGroups.some(vg => vg.items && vg.items.includes(deal.name));
+                const catNames = showCategoryBadges ? getCategoriesForProduct(deal.name) : [];
+                const cardClass = `rounded-lg shadow-sm overflow-hidden flex flex-col hover:shadow-md transition-shadow cursor-pointer ${hasVariants ? 'bg-orange-50/30 border-2 border-yellow-400 shadow-yellow-100/50' : 'bg-white border border-gray-200'}`;
+                return (
+                    <div key={deal.id}
+                        onClick={() => { setSelectedProduct(deal); setShowAllVariants(false); setIsDescriptionExpanded(false); setCurrentView('product_detail'); }}
+                        className={cardClass}>
+                        <div className="relative aspect-square bg-gray-200 flex-shrink-0">
+                            {deal.masterImage ? <img src={deal.masterImage} alt={deal.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
+                            <div className="absolute top-1 left-1 flex flex-col gap-0.5">
+                                {deal.isMemberPrice && <span className="px-1.5 py-0.5 bg-purple-500 text-white rounded text-[8px] font-bold shadow-sm">สมาชิก</span>}
+                                {deal.stickers && deal.stickers.map((sticker, idx) => (
+                                    <span key={idx} className={`px-1.5 py-0.5 text-[9px] font-bold rounded shadow-sm ${idx === 0 ? 'bg-red-500 text-white' : 'bg-green-500 text-white'}`}>{sticker}</span>
+                                ))}
+                            </div>
+                            <div className="absolute bottom-0 right-0 bg-white/90 backdrop-blur px-1.5 py-0.5 rounded-tl-lg font-bold text-orange-500 flex flex-col items-end shadow-sm">
+                                {showShippingInFeed ? (
+                                    <>
+                                        <span className="text-[8px] text-blue-500 font-bold leading-none">🚚 รวมค่าส่ง</span>
+                                        <span className="text-xs leading-none mt-0.5">คุ้มสุด ฿{deal.lowestPpuWithShipping?.toFixed(2)}/{deal.lowestPpuUnit}</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <span className="text-[9px] text-gray-400 line-through leading-none">฿{deal.normalPrice}</span>
+                                        <span className="text-xs leading-none mt-0.5">คุ้มสุด ฿{deal.lowestPpu?.toFixed(2)}/{deal.lowestPpuUnit}</span>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                        <div className="p-2 flex-1 flex flex-col">
+                            <h3 className="font-bold text-gray-800 text-[11px] leading-tight mb-1 line-clamp-2 min-h-[1.5rem]">{deal.name}</h3>
+
+                            {/* ── Category badges below name ── */}
+                            {showCategoryBadges && catNames.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mb-1">
+                                    {catNames.map(cat => (
+                                        <span key={cat} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-50 text-blue-600 border border-blue-100 rounded text-[9px] font-bold leading-none">
+                                            <Folder size={8} /> {cat}
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+
+                            <div className="mt-auto pt-1 border-t border-gray-50 flex items-center justify-between gap-1 text-[9px] text-gray-500">
+                                <div className="flex items-center gap-1">
+                                    <ShoppingBag size={10} className="shrink-0 text-orange-400" />
+                                    <span className="truncate">{deal.postsCount} โพสต์ชี้เป้า</span>
+                                </div>
+                                {deal.brand && (
+                                    <div
+                                        onClick={(e) => { e.stopPropagation(); setSelectedBrandForDetail(deal.brand); setCurrentView('brand_detail'); }}
+                                        className="text-[9px] bg-gray-100 px-1.5 py-0.5 rounded font-bold text-gray-600 hover:bg-orange-100 hover:text-orange-600 hover:shadow-sm transition-all truncate border border-gray-200 max-w-[60px]">
+                                        {deal.brand}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                );
             };
 
             // ===================== VIEWS =====================
@@ -429,38 +577,55 @@
             const renderProfile = () => (
                 <div className="flex-1 overflow-y-auto bg-gray-50 pb-24 animate-fade-in">
                     <div className="bg-white p-6 border-b border-gray-100 flex flex-col items-center">
-                        <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center text-gray-300 text-4xl mb-3 border-4 border-white outline outline-gray-100">
-                            <User size={40} />
-                        </div>
-                        <h2 className="text-xl font-bold text-gray-800">ผู้เยี่ยมชม (Guest)</h2>
-                        <button onClick={() => alert('ฟังก์ชันเข้าสู่ระบบจะเปิดให้บริการเร็วๆนี้')} className="mt-3 px-6 py-2 bg-green-500 hover:bg-green-600 text-white text-sm font-bold rounded-full transition-colors">
-                            เข้าสู่ระบบ / สมัครสมาชิก
+                        {userPhotoURL ? (
+                            <img src={userPhotoURL} alt={userDisplayName} className="w-24 h-24 rounded-full mb-3 border-4 border-white shadow-lg" />
+                        ) : (
+                            <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center text-gray-300 text-4xl mb-3 border-4 border-white outline outline-gray-100">
+                                <User size={40} />
+                            </div>
+                        )}
+                        <h2 className="text-xl font-bold text-gray-800">{userDisplayName}</h2>
+                        {currentUser?.email && <p className="text-sm text-gray-500 mt-1">{currentUser.email}</p>}
+                        {isGuestUser && (
+                            <div className="mt-3 flex flex-col gap-2 w-full max-w-xs">
+                                <button onClick={handleGoogleLogin} className="w-full px-6 py-2.5 bg-white border-2 border-gray-200 hover:bg-gray-50 text-gray-700 text-sm font-bold rounded-full transition-colors flex items-center justify-center gap-2">
+                                    <svg className="w-5 h-5" viewBox="0 0 24 24">
+                                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                                    </svg>
+                                    อัพเกรดด้วย Google
+                                </button>
+                                <p className="text-xs text-gray-400 text-center">เพื่อบันทึกข้อมูลและใช้งานได้ทุกอุปกรณ์</p>
+                            </div>
+                        )}
+                        {!isLoggedIn && (
+                            <button onClick={() => setShowLoginModal(true)} className="mt-3 px-6 py-2 bg-green-500 hover:bg-green-600 text-white text-sm font-bold rounded-full transition-colors">เข้าสู่ระบบ / สมัครสมาชิก</button>
+                        )}
+                        {isLoggedIn && !isGuestUser && (
+                            <button onClick={handleLogout} className="mt-3 px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm font-bold rounded-full transition-colors">ออกจากระบบ</button>
+                        )}
+                        {isLoggedIn && isGuestUser && (
+                            <button onClick={handleLogout} className="mt-2 px-4 py-1.5 text-red-400 hover:text-red-600 text-xs font-medium transition-colors">ออกจากระบบ Guest</button>
+                        )}
+                        <button onClick={() => setShowReportModal(true)} className="mt-4 flex items-center gap-2 px-4 py-2 bg-orange-50 hover:bg-orange-100 text-orange-600 text-sm font-bold rounded-full transition-colors border border-orange-200">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                            รายงานปัญหา / ข้อเสนอแนะ
                         </button>
                         <div className="flex gap-6 mt-6 w-full justify-center opacity-50">
-                            <div className="text-center">
-                                <div className="text-2xl font-bold text-gray-800">0</div>
-                                <div className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">บอกต่อ</div>
-                            </div>
+                            <div className="text-center"><div className="text-2xl font-bold text-gray-800">0</div><div className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">บอกต่อ</div></div>
                             <div className="w-px bg-gray-200"></div>
-                            <div className="text-center">
-                                <div className="text-2xl font-bold text-gray-800">0</div>
-                                <div className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">ถูกใจรวม</div>
-                            </div>
+                            <div className="text-center"><div className="text-2xl font-bold text-gray-800">0</div><div className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">ถูกใจรวม</div></div>
                         </div>
                     </div>
 
-                    <div className="flex bg-white border-b border-gray-100 sticky top-0 z-10">
-                        <button
-                            onClick={() => setProfileTab('posts')}
-                            className={`flex-1 py-4 text-sm font-bold transition-colors border-b-2 ${profileTab === 'posts' ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-400 hover:bg-gray-50'}`}
-                        >
-                            โพสต์บอกต่อ (1)
-                        </button>
-                        <button
-                            onClick={() => setProfileTab('likes')}
-                            className={`flex-1 py-4 text-sm font-bold transition-colors border-b-2 ${profileTab === 'likes' ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-400 hover:bg-gray-50'}`}
-                        >
-                            ที่ถูกใจ (2)
+                    <div className="flex bg-white border-b border-gray-100 sticky top-0 z-10 gap-1">
+                        <button onClick={() => setProfileTab('posts')} className={`flex-[0.45] py-4 text-sm font-bold transition-colors border-b-2 ${profileTab === 'posts' ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-400 hover:bg-gray-50'}`}>โพสต์บอกต่อ (1)</button>
+                        <button onClick={() => setProfileTab('likes')} className={`flex-[0.45] py-4 text-sm font-bold transition-colors border-b-2 ${profileTab === 'likes' ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-400 hover:bg-gray-50'}`}>ที่ถูกใจ (2)</button>
+                        <button onClick={() => setProfileTab('news')} className={`flex-[0.1] py-4 text-sm font-bold transition-colors border-b-2 flex items-center justify-center relative group ${profileTab === 'news' ? 'border-red-500 text-red-500' : 'border-transparent text-red-400 hover:bg-red-50'}`}>
+                            <Bell size={18} className="group-hover:scale-110 transition-transform" />
+                            {unreadAdminNewsCount > 0 && <span className="absolute top-1 right-1 bg-red-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-tight">{unreadAdminNewsCount > 99 ? '99+' : unreadAdminNewsCount}</span>}
                         </button>
                     </div>
 
@@ -473,19 +638,13 @@
                                 <div className="flex-1 flex flex-col justify-between py-1">
                                     <div>
                                         <h4 className="font-bold text-gray-800 text-sm leading-tight line-clamp-2">{deal.name}</h4>
-                                        <div className="text-xs text-gray-500 mt-1 flex items-center gap-1">
-                                            <MapPin size={10} /> {deal.shop}
-                                        </div>
+                                        <div className="text-xs text-gray-500 mt-1 flex items-center gap-1"><MapPin size={10} /> {deal.shop}</div>
                                     </div>
                                     <div className="flex justify-between items-end">
                                         <div className="text-lg font-bold text-red-500">฿{deal.price}</div>
                                         <div className="flex items-center gap-3 text-xs text-gray-400">
-                                            <span onClick={() => alert('กรุณาลงทะเบียนเข้าสู่ระบบเพื่อใช้งานฟังก์ชันนี้')} className="flex items-center gap-1 cursor-pointer hover:text-red-500 transition-colors">
-                                                <Heart size={14} className={profileTab === 'likes' ? 'fill-red-500 text-red-500' : ''} /> {deal.likes}
-                                            </span>
-                                            <span onClick={() => alert('กรุณาลงทะเบียนเข้าสู่ระบบเพื่อใช้งานฟังก์ชันนี้')} className="flex items-center gap-1 cursor-pointer hover:text-blue-500 transition-colors">
-                                                <MessageSquare size={14} /> {deal.comments}
-                                            </span>
+                                            <span onClick={() => !isLoggedIn ? setShowLoginModal(true) : alert('ฟีเจอร์กดถูกใจจะเปิดให้บริการเร็วๆ นี้')} className="flex items-center gap-1 cursor-pointer hover:text-red-500 transition-colors"><Heart size={14} className={profileTab === 'likes' ? 'fill-red-500 text-red-500' : ''} /> {deal.likes}</span>
+                                            <span onClick={() => !isLoggedIn ? setShowLoginModal(true) : alert('ฟีเจอร์แสดงความคิดเห็นจะเปิดให้บริการเร็วๆ นี้')} className="flex items-center gap-1 cursor-pointer hover:text-blue-500 transition-colors"><MessageSquare size={14} /> {deal.comments}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -494,119 +653,230 @@
                         {profileTab === 'posts' && deals.filter(d => d.reporter === 'Get_Hunter').length === 0 && (
                             <div className="text-center text-gray-400 py-10 text-sm">ยังไม่มีโพสต์บอกต่อ</div>
                         )}
+                        {profileTab === 'news' && (
+                            <div className="space-y-3">
+                                <div className="flex items-center gap-2 text-blue-600 text-sm font-bold mb-4"><Bell size={16} /> ข่าวสารจากผู้ดูแลระบบ ({adminNews.length})</div>
+                                {adminNews.length === 0 ? (
+                                    <div className="text-center text-gray-400 py-10 text-sm italic">ไม่มีข่าวสารใหม่</div>
+                                ) : (
+                                    adminNews.map(news => {
+                                        const isUnread = !viewedNewsIds.includes(news.id);
+                                        return (
+                                            <div
+                                                key={news.id}
+                                                onClick={() => {
+                                                    if (!viewedNewsIds.includes(news.id)) {
+                                                        setViewedNewsIds(prev => [...prev, news.id]);
+                                                    }
+                                                }}
+                                                className={`rounded-2xl p-4 hover:shadow-md transition-all cursor-pointer group border-2 ${
+                                                    isUnread
+                                                        ? 'bg-blue-50 border-blue-300 shadow-md'
+                                                        : 'bg-gray-50 border-gray-200'
+                                                }`}>
+                                                <div className="flex items-start gap-3">
+                                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform ${
+                                                        isUnread ? 'bg-blue-500' : 'bg-gray-400'
+                                                    }`}>
+                                                        <Bell size={18} className="text-white" />
+                                                    </div>
+                                                    <div className="flex-1 min-w-0 pr-2">
+                                                        <div className="flex items-start justify-between gap-2">
+                                                            <h4 className={`font-bold text-sm leading-tight ${
+                                                                isUnread ? 'text-blue-900' : 'text-gray-700'
+                                                            }`}>{news.text}</h4>
+                                                            {isUnread && <span className="text-[10px] bg-blue-500 text-white px-2 py-0.5 rounded-full font-bold flex-shrink-0">ใหม่</span>}
+                                                        </div>
+                                                        <div className={`text-[11px] mt-2 flex items-center gap-1 ${
+                                                            isUnread ? 'text-blue-600' : 'text-gray-500'
+                                                        }`}><Clock size={10} /> {new Date(news.createdAt).toLocaleString('th-TH')}</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
             );
 
+            // ── FEED: shipping toggle only, no dummy category tabs ──
             const renderFeed = () => (
                 <div className="flex-1 overflow-y-auto p-3 bg-gray-100 pb-24 animate-fade-in">
-                    <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-3 mb-1">
+                    {/* Only shipping toggle remains */}
+                    <div className="flex gap-2 mb-3">
                         <button
                             onClick={() => setShowShippingInFeed(v => !v)}
-                            className={`whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-bold transition-colors shadow-sm flex items-center gap-1 ${showShippingInFeed
-                                ? 'bg-blue-500 text-white'
-                                : 'bg-white text-blue-500 border border-blue-300 hover:bg-blue-50'
-                                }`}
-                        >
-                            {"\u{1F69A}"} รวมราคาขนส่ง
+                            className={`whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-bold transition-colors shadow-sm flex items-center gap-1.5 ${showShippingInFeed
+                                ? 'bg-blue-500 text-white shadow-blue-200'
+                                : 'bg-white text-blue-500 border border-blue-300 hover:bg-blue-50'}`}>
+                            🚚 รวมราคาขนส่ง
                         </button>
-                        {['ทั้งหมด', 'ใกล้ฉัน (5km)', 'สกินแคร์', 'ของกิน', 'ของใช้ในบ้าน'].map(tab => (
-                            <button
-                                key={tab}
-                                onClick={() => setActiveTab(tab)}
-                                className={`whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-bold transition-colors shadow-sm ${activeTab === tab
-                                    ? 'bg-orange-500 text-white'
-                                    : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-                                    }`}
-                            >
-                                {tab}
-                            </button>
-                        ))}
                     </div>
-
                     <div className="grid grid-cols-2 gap-3">
-                        {groupedDeals.map(deal => (
-                            <div key={deal.id} onClick={() => { setSelectedProduct(deal); setIsDescriptionExpanded(false); setCurrentView('product_detail'); }} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden flex flex-col hover:shadow-md transition-shadow cursor-pointer">
-                                <div className="relative aspect-square bg-gray-200 flex-shrink-0">
-                                    {deal.masterImage ? <img src={deal.masterImage} alt={deal.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
-                                    <div className="absolute top-1 left-1 flex flex-col gap-0.5">
-                                        {deal.stickers && deal.stickers.map((sticker, idx) => (
-                                            <span key={idx} className={`px-1.5 py-0.5 text-[9px] font-bold rounded shadow-sm ${idx === 0 ? 'bg-red-500 text-white' : 'bg-green-500 text-white'}`}>
-                                                {sticker}
-                                            </span>
-                                        ))}
-                                    </div>
-                                    <div className="absolute bottom-0 right-0 bg-white/90 backdrop-blur px-1.5 py-0.5 rounded-tl-lg font-bold text-orange-500 flex flex-col items-end shadow-sm">
-                                        {showShippingInFeed ? (
-                                            <>
-                                                <span className="text-[8px] text-blue-500 font-bold leading-none">{"\u{1F69A}"} รวมค่าส่ง</span>
-                                                <span className="text-xs leading-none mt-0.5">คุ้มสุด ฿{deal.lowestPpuWithShipping?.toFixed(2)}/{deal.lowestPpuUnit}</span>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <span className="text-[9px] text-gray-400 line-through leading-none">฿{deal.normalPrice}</span>
-                                                <span className="text-xs leading-none mt-0.5">คุ้มสุด ฿{deal.lowestPpu?.toFixed(2)}/{deal.lowestPpuUnit}</span>
-                                            </>
-                                        )}
-                                    </div>
-                                </div>
-                                <div className="p-2 flex-1 flex flex-col">
-                                    <h3 className="font-bold text-gray-800 text-[11px] leading-tight mb-1 line-clamp-2 min-h-[1.5rem]">{deal.name}</h3>
-                                    <div className="mt-auto pt-1 border-t border-gray-50 flex items-center justify-between gap-1 text-[9px] text-gray-500">
-                                        <div className="flex items-center gap-1">
-                                            <ShoppingBag size={10} className="shrink-0 text-orange-400" />
-                                            <span className="truncate">{deal.postsCount} โพสต์ชี้เป้า</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
+                        {groupedDeals.map(deal => renderProductCard(deal, false))}
                     </div>
                 </div>
             );
+
+            // ── SEARCH: real category chips from Firestore, category badges on cards ──
+            const renderSearch = () => {
+                // Build filtered results: text query + optional category filter
+                const searchResults = groupedDeals.filter(deal => {
+                    // Text match
+                    const q = searchQuery.toLowerCase();
+                    const textMatch = !q || (
+                        (deal.name && deal.name.toLowerCase().includes(q)) ||
+                        (deal.brand && deal.brand.toLowerCase().includes(q)) ||
+                        (deal.tags && deal.tags.some(t => t.toLowerCase().includes(q)))
+                    );
+                    // Category filter
+                    const catMatch = !activeCategoryFilter || (() => {
+                        const cat = categories.find(c => c.name === activeCategoryFilter);
+                        return cat ? (cat.items || []).includes(deal.name) : false;
+                    })();
+                    return textMatch && catMatch;
+                });
+
+                const isFiltering = searchQuery || activeCategoryFilter;
+
+                return (
+                    <div className="flex-1 flex flex-col bg-gray-100 overflow-hidden animate-fade-in relative z-0 pb-20">
+                        {/* Search bar */}
+                        <div className="bg-white p-4 border-b border-gray-200 shadow-sm z-10">
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    placeholder="พิมพ์ค้นหาสินค้า, ยี่ห้อ, แท็ก..."
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className="w-full py-2.5 pl-10 pr-4 bg-gray-50 rounded-xl text-sm font-medium text-gray-800 focus:outline-none border-2 border-transparent focus:border-orange-500 transition-colors"
+                                />
+                                <Search className="absolute left-3 top-3 text-gray-400" size={18} />
+                                {searchQuery && (
+                                    <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3 text-gray-400 hover:text-gray-600"><X size={18} /></button>
+                                )}
+                            </div>
+
+                            {/* ── Category filter chips from Firestore ── */}
+                            {categories.length > 0 && (
+                                <div className="flex gap-2 overflow-x-auto hide-scrollbar mt-3 pb-0.5">
+                                    {/* "ทั้งหมด" chip */}
+                                    <button
+                                        onClick={() => setActiveCategoryFilter(null)}
+                                        className={`whitespace-nowrap flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold transition-all flex-shrink-0 ${!activeCategoryFilter
+                                            ? 'bg-orange-500 text-white shadow-sm shadow-orange-200'
+                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                                        <Grid size={11} /> ทั้งหมด
+                                    </button>
+                                    {categories.map(cat => (
+                                        <button
+                                            key={cat.id}
+                                            onClick={() => setActiveCategoryFilter(activeCategoryFilter === cat.name ? null : cat.name)}
+                                            className={`whitespace-nowrap flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold transition-all flex-shrink-0 ${activeCategoryFilter === cat.name
+                                                ? 'bg-blue-600 text-white shadow-sm shadow-blue-200'
+                                                : 'bg-white text-gray-600 border border-gray-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200'}`}>
+                                            <Folder size={11} /> {cat.name}
+                                            <span className={`text-[9px] px-1 py-0.5 rounded-full ml-0.5 font-bold ${activeCategoryFilter === cat.name ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-400'}`}>
+                                                {(cat.items || []).length}
+                                            </span>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-3">
+                            {isFiltering ? (
+                                <div>
+                                    <h3 className="text-xs font-bold text-gray-500 mb-3 ml-1 uppercase tracking-wider flex items-center gap-2">
+                                        พบ {searchResults.length} รายการ
+                                        {activeCategoryFilter && (
+                                            <span className="flex items-center gap-1 bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold">
+                                                <Folder size={10} /> {activeCategoryFilter}
+                                                <button onClick={() => setActiveCategoryFilter(null)} className="ml-0.5 hover:text-red-500"><X size={10} /></button>
+                                            </span>
+                                        )}
+                                    </h3>
+                                    {searchResults.length > 0 ? (
+                                        <div className="grid grid-cols-2 gap-3 pb-6">
+                                            {searchResults.map(deal => renderProductCard(deal, true))}
+                                        </div>
+                                    ) : (
+                                        <div className="text-center py-10 flex flex-col items-center">
+                                            <AlertCircle size={40} className="text-gray-300 mb-3" />
+                                            <div className="text-gray-500 text-sm font-medium">ไม่พบสินค้าที่คุณค้นหา</div>
+                                            <div className="text-gray-400 text-xs mt-1">ลองเปลี่ยนคำค้นหา หรือเลือกหมวดหมู่อื่น</div>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                /* Empty state — no search, no filter */
+                                <div className="flex flex-col items-center justify-center text-gray-400 py-8">
+                                    <Search size={40} className="mb-4 text-gray-300" />
+                                    <h2 className="text-lg font-bold text-gray-600 mb-2">ค้นหาสินค้า</h2>
+                                    <p className="text-xs text-center text-gray-500 mb-6 leading-relaxed">
+                                        ค้นหาสินค้าราคาถูกที่สุด<br />จากหลากหลายร้านค้ารอบตัวคุณ
+                                    </p>
+                                    {/* Show all categories as a visual grid when idle */}
+                                    {categories.length > 0 && (
+                                        <div className="w-full">
+                                            <h3 className="text-xs font-bold text-gray-600 mb-3 text-left flex items-center gap-1.5"><Folder size={13} className="text-blue-500" /> หมวดหมู่ทั้งหมด</h3>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                {categories.map(cat => (
+                                                    <button
+                                                        key={cat.id}
+                                                        onClick={() => setActiveCategoryFilter(cat.name)}
+                                                        className="flex items-center gap-2.5 p-3 bg-white rounded-xl shadow-sm border border-gray-100 hover:border-blue-300 hover:shadow-md transition-all text-left active:scale-95">
+                                                        <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
+                                                            <Folder size={16} className="text-blue-500" />
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <div className="text-xs font-bold text-gray-800 truncate">{cat.name}</div>
+                                                            <div className="text-[10px] text-gray-400">{(cat.items || []).length} รายการ</div>
+                                                        </div>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            };
 
             const renderAddDeal = () => (
                 <div className="flex-1 flex flex-col bg-white overflow-hidden animate-fade-in relative z-0 pb-20">
                     <div className="flex-none bg-green-50/50 border-b border-green-100 p-6 flex flex-col justify-end items-end min-h-[160px] relative transition-all shadow-inner">
-                        <div className="absolute top-4 left-4 flex gap-2">
-                            {store && (
-                                <span className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-gray-200 text-gray-600">
-                                    {store}
-                                </span>
-                            )}
+                        <div className="absolute top-4 left-4 flex items-center gap-2">
+                            <button onClick={() => { setCurrentView('feed'); setIsItemLocked(false); }} className="p-2 -ml-2 text-gray-400 hover:text-gray-600">
+                                <ChevronLeft size={24} />
+                            </button>
+                            {store && <span className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-gray-200 text-gray-600">{store}</span>}
                         </div>
-
                         <div className="w-full text-right space-y-1">
                             <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">ราคาต่อหน่วย (PPU)</div>
-                            <div className="text-2xl font-bold text-green-600">
-                                {ppu.toFixed(2)} <span className="text-xs text-green-400">฿/{unitType || 'unit'}</span>
-                            </div>
+                            <div className="text-2xl font-bold text-green-600">{ppu.toFixed(2)} <span className="text-xs text-green-400">฿/{unitType || 'unit'}</span></div>
                         </div>
-
                         <div className="flex items-baseline gap-1 mt-2">
                             <span className="text-2xl font-medium text-gray-400">฿</span>
                             <div className="text-6xl font-bold text-gray-900 tracking-tighter leading-none">{price || '0'}</div>
                         </div>
-                        <div className="text-sm font-medium text-gray-400 mt-1">
-                            {unit} {unitType || 'units'}
-                        </div>
-
+                        <div className="text-sm font-medium text-gray-400 mt-1">{unit} {unitType || 'units'}</div>
                         {useCashback && cashbackAmount > 0 && (
                             <div className="mt-2 text-right">
                                 <span className="text-[10px] font-bold text-orange-400 uppercase tracking-widest">หักส่วนลดแล้วเหลือ</span>
                                 <div className="text-xl font-bold text-orange-500">฿{Math.max(0, numPrice - numCashback)}</div>
                             </div>
                         )}
-
                         {shippingType === 'excluded' && (
                             <div className="mt-3 bg-white/60 p-2 rounded-xl border border-green-200">
                                 <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-gray-600">
-                                    <input
-                                        type="checkbox"
-                                        checked={includeShippingInPpu}
-                                        onChange={(e) => setIncludeShippingInPpu(e.target.checked)}
-                                        className="rounded text-green-500 focus:ring-green-500 w-4 h-4"
-                                    />
+                                    <input type="checkbox" checked={includeShippingInPpu} onChange={(e) => setIncludeShippingInPpu(e.target.checked)} className="rounded text-green-500 focus:ring-green-500 w-4 h-4" />
                                     รวมค่าจัดส่งเพื่อดูราคาจริง (+฿{shippingFee || 0})
                                 </label>
                             </div>
@@ -614,34 +884,59 @@
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                        <div className="space-y-2">
+                        <div className="space-y-2 relative">
                             <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">ชื่อสินค้า</label>
-                            <input
-                                type="text" placeholder="เช่น กระดาษทิชชู่ Scott หนา 3 ชั้น" value={itemName} onChange={(e) => setItemName(e.target.value)}
-                                className="w-full p-4 bg-gray-50 rounded-2xl text-sm font-semibold text-gray-800 border-2 border-transparent focus:border-green-500 outline-none transition-all"
-                            />
+                            <input type="text" placeholder="เช่น กระดาษทิชชู่ Scott หนา 3 ชั้น" value={itemName} onChange={(e) => setItemName(e.target.value)}
+                                disabled={isItemLocked}
+                                className={`w-full p-4 rounded-2xl text-sm font-semibold border-2 transition-all outline-none ${isItemLocked ? 'bg-gray-100 text-gray-500 border-gray-100' : 'bg-gray-50 text-gray-800 border-transparent focus:border-green-500'}`} />
+                            {itemName && !isItemLocked && (() => {
+                                const q = itemName.toLowerCase().trim();
+                                const searchTerms = q.split(/\s+/);
+                                const suggestions = uniqueProductsWithBrand.filter(p => {
+                                    if (p.name.toLowerCase() === q) return false;
+                                    const target = `${p.name} ${p.brand}`.toLowerCase();
+                                    return searchTerms.every(term => target.includes(term));
+                                }).slice(0, 3);
+                                if (suggestions.length === 0) return null;
+                                return (
+                                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg animate-fade-in overflow-hidden">
+                                        <div className="text-[10px] text-gray-400 font-bold px-3 py-2 bg-gray-50 border-b border-gray-100 flex items-center gap-1">💡 สินค้าที่เคยมีคนโพสต์แล้ว (แตะเพื่อเลือก)</div>
+                                        {suggestions.map(s => (
+                                            <button key={s.name} onClick={() => { setItemName(s.name); if (s.brand) setBrand(s.brand); }}
+                                                className="w-full text-left px-4 py-2 hover:bg-green-50 hover:text-green-700 text-gray-700 text-sm font-medium transition-colors border-b border-gray-50 last:border-0 flex flex-col">
+                                                <span>{s.name}</span>
+                                                {s.brand && <span className="text-[10px] text-gray-400">ยี่ห้อ: {s.brand}</span>}
+                                            </button>
+                                        ))}
+                                    </div>
+                                );
+                            })()}
+                        </div>
+
+                        <div className="space-y-2 relative mt-4">
+                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">ยี่ห้อ {isItemLocked && '(Locked)'}</label>
+                            <input type="text" placeholder="เช่น Scott, Mizumi" value={brand} onChange={(e) => setBrand(e.target.value)}
+                                disabled={isItemLocked}
+                                className={`w-full p-4 rounded-2xl text-sm font-semibold border-2 transition-all outline-none ${isItemLocked ? 'bg-gray-100 text-gray-500 border-gray-100' : 'bg-gray-50 text-gray-800 border-transparent focus:border-green-500'}`} />
+                            {brand && !isItemLocked && (() => {
+                                const q = brand.toLowerCase().trim();
+                                const uniqueBrands = [...new Set(uniqueProductsWithBrand.map(p => p.brand).filter(Boolean))];
+                                const suggestions = uniqueBrands.filter(b => b.toLowerCase() !== q && b.toLowerCase().includes(q)).slice(0, 3);
+                                if (suggestions.length === 0) return null;
+                                return (
+                                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg animate-fade-in overflow-hidden">
+                                        {suggestions.map(b => (
+                                            <button key={b} onClick={() => setBrand(b)} className="w-full text-left px-4 py-2 hover:bg-green-50 hover:text-green-700 text-gray-700 text-sm font-medium transition-colors border-b border-gray-50 last:border-0">{b}</button>
+                                        ))}
+                                    </div>
+                                );
+                            })()}
                         </div>
 
                         <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">ยี่ห้อ (Optional)</label>
-                            <input
-                                type="text" placeholder="เช่น Scott, Mizumi" value={brand} onChange={(e) => setBrand(e.target.value)}
-                                className="w-full p-4 bg-gray-50 rounded-2xl text-sm font-semibold text-gray-800 border-2 border-transparent focus:border-green-500 outline-none transition-all"
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1 flex justify-between">
-                                <span>แท็ก (Tags) {tags.length}/5</span>
-                            </label>
-                            <input
-                                type="text" placeholder="กด Enter หรือ ลูกน้ำ (,) เพื่อเพิ่มแท็ก"
-                                value={tagInput}
-                                onChange={(e) => setTagInput(e.target.value)}
-                                onKeyDown={handleAddTag}
-                                disabled={tags.length >= 5}
-                                className="w-full p-3 bg-gray-50 rounded-xl text-sm font-semibold text-gray-700 border-2 border-transparent focus:border-green-500 outline-none disabled:opacity-50"
-                            />
+                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1 flex justify-between"><span>แท็ก (Tags) {tags.length}/5</span></label>
+                            <input type="text" placeholder="กด Enter หรือ ลูกน้ำ (,) เพื่อเพิ่มแท็ก" value={tagInput} onChange={(e) => setTagInput(e.target.value)} onKeyDown={handleAddTag} disabled={tags.length >= 5}
+                                className="w-full p-3 bg-gray-50 rounded-xl text-sm font-semibold text-gray-700 border-2 border-transparent focus:border-green-500 outline-none disabled:opacity-50" />
                             {tags.length > 0 && (
                                 <div className="flex flex-wrap gap-2 mt-2">
                                     {tags.map(tag => (
@@ -655,49 +950,37 @@
                         </div>
 
                         <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">เจอที่ร้านไหน?</label>
-                            <input
-                                type="text" placeholder="พิมพ์ชื่อร้าน หรือเลือกจากด้านล่าง" value={store} onChange={(e) => setStore(e.target.value)}
-                                className="w-full p-3 mb-2 bg-gray-50 rounded-xl text-sm font-semibold text-gray-700 border-2 border-transparent focus:border-green-500 outline-none"
-                            />
+                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1 flex items-center gap-1">เจอที่ร้านไหน? <span className="text-red-500">*</span></label>
+                            <input type="text" placeholder="พิมพ์ชื่อร้าน หรือเลือกจากด้านล่าง" value={store} onChange={(e) => setStore(e.target.value)}
+                                className="w-full p-3 mb-2 bg-gray-50 rounded-xl text-sm font-semibold text-gray-700 border-2 border-transparent focus:border-green-500 outline-none" />
                             <div className="flex flex-wrap gap-2">
-                                {['Watsons', '7-11', 'Lotus', 'Makro', 'Shopee', 'Lazada'].map(s => (
-                                    <button
-                                        key={s} onClick={() => setStore(s)}
-                                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase border transition-colors ${store === s ? 'bg-green-50 text-green-600 border-green-200' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
-                                    >
+                                {['WATSONS', '7-11', 'Lotus\'s', 'Makro', 'Shopee', 'Lazada'].map(s => (
+                                    <button key={s} onClick={() => setStore(s)}
+                                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase border transition-colors ${store === s ? 'bg-green-50 text-green-600 border-green-200' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
                                         {s}
                                     </button>
                                 ))}
                             </div>
-                            {/* Store fuzzy search suggestions */}
                             {store && (() => {
                                 const q = store.toLowerCase();
                                 const suggestions = stores.filter(s => {
-                                    if (s.id.toLowerCase() === q) return false; // Hide if exact match
+                                    if (s.id.toLowerCase() === q) return false;
                                     if (s.id.toLowerCase().includes(q)) return true;
                                     if (s.aliases && s.aliases.some(a => a.toLowerCase().includes(q))) return true;
                                     return false;
                                 }).slice(0, 3);
-                                
                                 if (suggestions.length === 0) return null;
-                                
                                 return (
                                     <div className="mt-2 bg-blue-50 border border-blue-200 rounded-xl p-2 flex flex-col gap-1 mx-2 shadow-inner animate-fade-in">
                                         <div className="text-[10px] text-blue-500 font-bold px-1 mb-1 flex items-center gap-1">💡 แนะนำร้านค้า (แตะเพื่อเลือก)</div>
                                         {suggestions.map(s => (
-                                            <button 
-                                                key={s.id}
-                                                onClick={() => setStore(s.id)}
-                                                className="w-full text-left px-3 py-2 bg-white hover:bg-blue-500 hover:text-white text-blue-700 text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center justify-between group"
-                                            >
+                                            <button key={s.id} onClick={() => setStore(s.id)}
+                                                className="w-full text-left px-3 py-2 bg-white hover:bg-blue-500 hover:text-white text-blue-700 text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center justify-between group">
                                                 <div className="flex items-center gap-2">
                                                     <span>{s.id}</span>
                                                     {s.isOfficial && <span className="text-[9px] bg-orange-400 text-white px-1 rounded-sm shadow-sm">★</span>}
                                                 </div>
-                                                <span className="text-[10px] text-gray-400 group-hover:text-blue-200">
-                                                    {s.aliases?.find(a => a.toLowerCase().includes(q))}
-                                                </span>
+                                                <span className="text-[10px] text-gray-400 group-hover:text-blue-200">{s.aliases?.find(a => a.toLowerCase().includes(q))}</span>
                                             </button>
                                         ))}
                                     </div>
@@ -708,37 +991,24 @@
                         <div className="grid grid-cols-2 gap-4">
                             <div className="col-span-2 space-y-2">
                                 <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">ราคา (฿)</label>
-                                <input
-                                    type="number" placeholder="0" value={price} onChange={(e) => setPrice(e.target.value)}
-                                    className="w-full bg-gray-50 text-gray-900 text-3xl font-bold p-4 rounded-2xl border-2 border-transparent focus:border-green-500 focus:bg-white transition-all outline-none text-center"
-                                />
+                                <input type="number" placeholder="0" value={price} onChange={(e) => setPrice(e.target.value)}
+                                    className="w-full bg-gray-50 text-gray-900 text-3xl font-bold p-4 rounded-2xl border-2 border-transparent focus:border-green-500 focus:bg-white transition-all outline-none text-center" />
                             </div>
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">จำนวน</label>
-                                <div className="flex h-[50px] bg-gray-50 rounded-xl overflow-hidden border-2 border-gray-100">
-                                    <input
-                                        type="text"
-                                        inputMode="numeric"
-                                        pattern="[0-9]*"
-                                        value={unitDisplay}
-                                        onChange={(e) => {
-                                            const raw = e.target.value.replace(/[^0-9]/g, '');
-                                            setUnitDisplay(raw);
-                                            const parsed = parseInt(raw);
-                                            if (!isNaN(parsed) && parsed > 0) setUnit(parsed);
-                                        }}
-                                        onBlur={() => {
-                                            const safe = Math.max(1, parseInt(unitDisplay) || 1);
-                                            setUnit(safe);
-                                            setUnitDisplay(String(safe));
-                                        }}
-                                        className="flex-1 bg-transparent text-center font-bold text-gray-800 text-sm outline-none"
-                                    />
+                                <div className={`flex h-[50px] rounded-xl overflow-hidden border-2 ${isItemLocked ? 'bg-gray-100 border-gray-100' : 'bg-gray-50 border-gray-100'}`}>
+                                    <input type="text" inputMode="numeric" pattern="[0-9]*" value={unitDisplay}
+                                        disabled={isItemLocked}
+                                        onChange={(e) => { const raw = e.target.value.replace(/[^0-9]/g, ''); setUnitDisplay(raw); const parsed = parseInt(raw); if (!isNaN(parsed) && parsed > 0) setUnit(parsed); }}
+                                        onBlur={() => { const safe = Math.max(1, parseInt(unitDisplay) || 1); setUnit(safe); setUnitDisplay(String(safe)); }}
+                                        className={`flex-1 bg-transparent text-center font-bold text-sm outline-none ${isItemLocked ? 'text-gray-400' : 'text-gray-800'}`} />
                                 </div>
                             </div>
                             <div className="space-y-2">
-                                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">หน่วย (ชิ้น/แพค)</label>
-                                <input type="text" value={unitType} onChange={(e) => setUnitType(e.target.value)} className="w-full h-[50px] p-3 bg-gray-50 rounded-xl text-sm font-semibold text-gray-700 border-2 border-transparent focus:border-green-500 outline-none text-center" />
+                                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">หน่วย</label>
+                                <input type="text" value={unitType} onChange={(e) => setUnitType(e.target.value)} 
+                                    disabled={isItemLocked}
+                                    className={`w-full h-[50px] p-3 rounded-xl text-sm font-semibold border-2 outline-none text-center transition-all ${isItemLocked ? 'bg-gray-100 border-gray-100 text-gray-400' : 'bg-gray-50 text-gray-700 border-transparent focus:border-green-500'}`} />
                             </div>
                             <div className="space-y-2 col-span-2">
                                 <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">ค่าส่ง</label>
@@ -757,12 +1027,14 @@
                                 <input type="checkbox" checked={usePromo} onChange={(e) => setUsePromo(e.target.checked)} className="rounded text-blue-500 focus:ring-blue-500 w-4 h-4" />
                                 <span className="text-xs font-bold text-blue-600 flex items-center gap-1"><Zap size={14} /> โค้ดส่วนลด (Promo Code)</span>
                             </label>
-                            {usePromo && (
-                                <input
-                                    type="text" placeholder="โค้ดส่วนลด เช่น HELLO20" value={promoCode} onChange={(e) => setPromoCode(e.target.value)}
-                                    className="w-full p-3 bg-white rounded-xl text-sm font-semibold text-blue-600 border-2 border-blue-200 outline-none uppercase"
-                                />
-                            )}
+                            {usePromo && <input type="text" placeholder="โค้ดส่วนลด เช่น HELLO20" value={promoCode} onChange={(e) => setPromoCode(e.target.value)} className="w-full p-3 bg-white rounded-xl text-sm font-semibold text-blue-600 border-2 border-blue-200 outline-none uppercase" />}
+                        </div>
+
+                        <div className="p-4 bg-purple-50/50 border border-purple-100 rounded-2xl space-y-3">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" checked={isMemberPrice} onChange={(e) => setIsMemberPrice(e.target.checked)} className="rounded text-purple-500 focus:ring-purple-500 w-4 h-4" />
+                                <span className="text-xs font-bold text-purple-600 flex items-center gap-1"><Tag size={14} /> ราคาสมาชิก (Member Price)</span>
+                            </label>
                         </div>
 
                         <div className="p-4 bg-orange-50/50 border border-orange-100 rounded-2xl space-y-3">
@@ -770,42 +1042,20 @@
                                 <input type="checkbox" checked={useCashback} onChange={(e) => setUseCashback(e.target.checked)} className="rounded text-orange-500 focus:ring-orange-500 w-4 h-4" />
                                 <span className="text-xs font-bold text-orange-600 flex items-center gap-1"><Zap size={14} /> เงินคืน (Cashback)</span>
                             </label>
-                            {useCashback && (
-                                <input
-                                    type="number" placeholder="ยอดเงินคืน (฿)" value={cashbackAmount} onChange={(e) => setCashbackAmount(e.target.value)}
-                                    className="w-full p-3 bg-white rounded-xl text-sm font-semibold text-orange-600 border-2 border-orange-200 outline-none"
-                                />
-                            )}
+                            {useCashback && <input type="number" placeholder="ยอดเงินคืน (฿)" value={cashbackAmount} onChange={(e) => setCashbackAmount(e.target.value)} className="w-full p-3 bg-white rounded-xl text-sm font-semibold text-orange-600 border-2 border-orange-200 outline-none" />}
                         </div>
 
                         <div className="space-y-2">
                             <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">รูปภาพ</label>
                             <p className="text-[10px] text-gray-400 ml-1 -mt-1">สินค้าและป้ายราคา</p>
-                            <input
-                                ref={fileInputRef}
-                                type="file"
-                                accept="image/*"
-                                capture="environment"
-                                onChange={handleImageCapture}
-                                className="hidden"
-                            />
+                            <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={handleImageCapture} className="hidden" />
                             {imageBase64 ? (
                                 <div className="relative w-full h-[160px] rounded-xl overflow-hidden border-2 border-green-300 shadow-sm">
                                     <img src={imageBase64} alt="Preview" className="w-full h-full object-cover" />
-                                    <button
-                                        type="button"
-                                        onClick={() => { setImageBase64(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
-                                        className="absolute top-2 right-2 w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-transform"
-                                    >
-                                        <X size={16} />
-                                    </button>
+                                    <button type="button" onClick={() => { setImageBase64(null); if (fileInputRef.current) fileInputRef.current.value = ''; }} className="absolute top-2 right-2 w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-transform"><X size={16} /></button>
                                 </div>
                             ) : (
-                                <button
-                                    type="button"
-                                    onClick={() => fileInputRef.current?.click()}
-                                    className="w-full h-[80px] rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 hover:bg-gray-100 active:bg-gray-200 flex flex-col items-center justify-center gap-1 transition-colors"
-                                >
+                                <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full h-[80px] rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 hover:bg-gray-100 active:bg-gray-200 flex flex-col items-center justify-center gap-1 transition-colors">
                                     <Camera size={24} className="text-gray-400" />
                                     <span className="text-xs font-bold text-gray-500">แตะเพื่อถ่ายรูป/อัพโหลดรูป</span>
                                 </button>
@@ -821,106 +1071,24 @@
                 </div>
             );
 
-            const renderSearch = () => {
-                const searchResults = groupedDeals.filter(deal => {
-                    const q = searchQuery.toLowerCase();
-                    return (
-                        (deal.name && deal.name.toLowerCase().includes(q)) ||
-                        (deal.brand && deal.brand.toLowerCase().includes(q)) ||
-                        (deal.tags && deal.tags.some(t => t.toLowerCase().includes(q)))
-                    );
-                });
-
-                return (
-                    <div className="flex-1 flex flex-col bg-gray-100 overflow-hidden animate-fade-in relative z-0 pb-20">
-                        <div className="bg-white p-4 border-b border-gray-200 shadow-sm z-10">
-                            <div className="relative">
-                                <input
-                                    type="text"
-                                    placeholder="พิมพ์ค้นหาสินค้า, ร้านค้า, หมวดหมู่..."
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="w-full py-2.5 pl-10 pr-4 bg-gray-50 rounded-xl text-sm font-medium text-gray-800 focus:outline-none border-2 border-transparent focus:border-orange-500 transition-colors"
-                                />
-                                <Search className="absolute left-3 top-3 text-gray-400" size={18} />
-                                {searchQuery && (
-                                    <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3 text-gray-400 hover:text-gray-600">
-                                        <AlertCircle size={18} />
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto p-3">
-                            {searchQuery ? (
-                                <div>
-                                    <h3 className="text-xs font-bold text-gray-500 mb-3 ml-1 uppercase tracking-wider">พบ {searchResults.length} รายการ</h3>
-                                    {searchResults.length > 0 ? (
-                                        <div className="grid grid-cols-2 gap-3 pb-6">
-                                            {searchResults.map(deal => (
-                                                <div key={deal.id} onClick={() => { setSelectedProduct(deal); setIsDescriptionExpanded(false); setCurrentView('product_detail'); }} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden flex flex-col hover:shadow-md transition-shadow cursor-pointer">
-                                                    <div className="relative aspect-square bg-gray-200 flex-shrink-0">
-                                                        {deal.masterImage ? <img src={deal.masterImage} alt={deal.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
-                                                        <div className="absolute bottom-0 right-0 bg-white/90 backdrop-blur px-1.5 py-0.5 rounded-tl-lg font-bold text-orange-500 flex flex-col items-end shadow-sm">
-                                                            <span className="text-[9px] text-gray-400 line-through leading-none">฿{deal.normalPrice}</span>
-                                                            <span className="text-xs leading-none mt-0.5">คุ้มสุด ฿{deal.lowestPpu?.toFixed(2)}/{deal.lowestPpuUnit}</span>
-                                                        </div>
-                                                    </div>
-                                                    <div className="p-2 flex-1 flex flex-col">
-                                                        <h3 className="font-bold text-gray-800 text-[11px] leading-tight mb-1 line-clamp-2 min-h-[1.5rem]">{deal.name}</h3>
-                                                        <div className="mt-auto pt-1 border-t border-gray-50 flex items-center justify-between gap-1 text-[9px] text-gray-500">
-                                                            <div className="flex items-center gap-1">
-                                                                <ShoppingBag size={10} className="shrink-0 text-orange-400" />
-                                                                <span className="truncate">{deal.postsCount} โพสต์ชี้เป้า</span>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    ) : (
-                                        <div className="text-center py-10 flex flex-col items-center">
-                                            <AlertCircle size={40} className="text-gray-300 mb-3" />
-                                            <div className="text-gray-500 text-sm font-medium">ไม่พบสินค้าที่คุณค้นหา</div>
-                                            <div className="text-gray-400 text-xs mt-1">ลองเปลี่ยนคำค้นหา หรือค้นหาด้วยหมวดหมู่</div>
-                                        </div>
-                                    )}
-                                </div>
-                            ) : (
-                                <div className="flex flex-col items-center justify-center text-gray-400 py-10">
-                                    <Search size={40} className="mb-4 text-gray-300" />
-                                    <h2 className="text-lg font-bold text-gray-600 mb-2">ค้นหาสินค้า</h2>
-                                    <p className="text-xs text-center text-gray-500 mb-6 leading-relaxed">ค้นหาสินค้าราคาถูกที่สุด<br />จากหลากหลายร้านค้ารอบตัวคุณ</p>
-                                    <div className="w-full bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-                                        <h3 className="text-xs font-bold text-gray-600 mb-3 text-left">หมวดหมู่ยอดฮิต</h3>
-                                        <div className="flex flex-wrap gap-2">
-                                            {['ของใช้ในบ้าน', 'สกินแคร์', 'อาหาร', 'เครื่องดื่ม', 'ขนม'].map(tag => (
-                                                <button key={tag} onClick={() => setSearchQuery(tag)} className="px-3 py-1.5 bg-gray-50 hover:bg-orange-50 text-gray-600 hover:text-orange-600 rounded-lg text-[10px] font-bold border border-gray-200 hover:border-orange-200 transition-colors">
-                                                    {tag}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                );
-            };
-
             const renderProductDetail = () => {
                 if (!selectedProduct) return null;
-
-                const productDeals = deals
-                    .filter(d => d.name === selectedProduct.name)
-                    .sort((a, b) => a.ppu - b.ppu);
+                const variantGroup = variantGroups.find(vg => vg.items && vg.items.includes(selectedProduct.name));
+                let productDeals = [];
+                if (showAllVariants && variantGroup) {
+                    productDeals = deals.filter(d => variantGroup.items.includes(d.name)).sort((a, b) => a.ppu - b.ppu);
+                } else {
+                    productDeals = deals.filter(d => d.name === selectedProduct.name).sort((a, b) => a.ppu - b.ppu);
+                }
+                const displayTitle = (showAllVariants && variantGroup) ? `รวมทุกรุ่น: ${variantGroup.name}` : selectedProduct.name;
+                const displayBrand = selectedProduct.brand;
+                const displayDescription = selectedProduct.description;
+                const productCategoryNames = getCategoriesForProduct(selectedProduct.name);
 
                 return (
                     <div className="flex-1 flex flex-col bg-gray-100 overflow-hidden animate-fade-in relative z-0 pb-20">
                         <div className="bg-white p-4 border-b border-gray-200 shadow-sm z-10 sticky top-0 flex items-center gap-3">
-                            <button onClick={() => setCurrentView('feed')} className="p-2 -ml-2 text-gray-400 hover:text-gray-600">
-                                <ChevronLeft size={24} />
-                            </button>
+                            <button onClick={() => setCurrentView('feed')} className="p-2 -ml-2 text-gray-400 hover:text-gray-600"><ChevronLeft size={24} /></button>
                             <h2 className="text-lg font-bold text-gray-800 truncate flex-1">รายละเอียดสินค้า</h2>
                         </div>
 
@@ -932,8 +1100,23 @@
                                     </div>
                                     <div className="flex-1 flex flex-col justify-between py-1">
                                         <div>
-                                            <h3 className="font-bold text-gray-800 text-base leading-tight mb-1.5">{selectedProduct.name}</h3>
-                                            {selectedProduct.brand && <div className="text-xs text-gray-500 bg-gray-50 px-2 py-1 rounded-md border border-gray-100 font-bold inline-block">ยี่ห้อ: {selectedProduct.brand}</div>}
+                                            <h3 className="font-bold text-gray-800 text-base leading-tight mb-1.5">{displayTitle}</h3>
+                                            {displayBrand && (
+                                                <div onClick={(e) => { e.stopPropagation(); setSelectedBrandForDetail(displayBrand); setCurrentView('brand_detail'); }}
+                                                    className="text-xs text-gray-500 bg-gray-50 px-2 py-1 rounded-md border border-gray-100 font-bold inline-block cursor-pointer hover:bg-orange-50 hover:text-orange-600 hover:border-orange-200 transition-colors">
+                                                    ยี่ห้อ: {displayBrand}
+                                                </div>
+                                            )}
+                                            {/* ── Category badges on product detail ── */}
+                                            {productCategoryNames.length > 0 && (
+                                                <div className="flex flex-wrap gap-1 mt-2">
+                                                    {productCategoryNames.map(cat => (
+                                                        <span key={cat} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-600 border border-blue-100 rounded-full text-[10px] font-bold">
+                                                            <Folder size={9} /> {cat}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="mt-auto">
                                             <div className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">คุ้มที่สุดตอนนี้</div>
@@ -944,25 +1127,49 @@
                                     </div>
                                 </div>
 
-                                {selectedProduct.description && (
+                                {displayDescription && (
                                     <div className="text-xs text-gray-600 mt-4 p-4 bg-gray-50 rounded-2xl border border-gray-100">
-                                        <div className="flex items-center gap-1.5 text-gray-400 mb-2 uppercase tracking-widest text-[9px] font-bold">
-                                            <FileText size={12} /> ข้อมูลและรายละเอียด
-                                        </div>
+                                        <div className="flex items-center gap-1.5 text-gray-400 mb-2 uppercase tracking-widest text-[9px] font-bold"><FileText size={12} /> ข้อมูลและรายละเอียด</div>
                                         <div className={`leading-relaxed font-medium ${!isDescriptionExpanded ? 'line-clamp-1' : ''}`}>
-                                            {selectedProduct.description}
+                                            {displayDescription}
                                             {isDescriptionExpanded && <span className="block mt-2 text-[10px] text-gray-400 italic">Admin</span>}
                                         </div>
-                                        {selectedProduct.description.length > 50 && (
-                                            <button
-                                                onClick={() => setIsDescriptionExpanded(!isDescriptionExpanded)}
-                                                className="mt-2 text-blue-500 font-bold hover:underline py-1"
-                                            >
+                                        {displayDescription.length > 50 && (
+                                            <button onClick={() => setIsDescriptionExpanded(!isDescriptionExpanded)} className="mt-2 text-blue-500 font-bold hover:underline py-1">
                                                 {isDescriptionExpanded ? 'แสดงน้อยลง' : 'อ่านต่อ'}
                                             </button>
                                         )}
                                     </div>
                                 )}
+
+                                {/* Variant chips */}
+                                {(() => {
+                                    const vg = variantGroups.find(vg => vg.items && vg.items.includes(selectedProduct.name));
+                                    if (!vg || vg.items.length < 2) return null;
+                                    return (
+                                        <div className="mt-4 p-4 bg-white rounded-2xl border border-gray-100 shadow-sm">
+                                            <div className="flex items-center justify-between mb-3 uppercase tracking-widest text-[10px] font-bold">
+                                                <div className="flex items-center gap-1.5 text-gray-500"><Tag size={12} className="text-orange-400" /> ตัวเลือกสินค้า (รุ่นย่อย)</div>
+                                                <div className="text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-100 font-bold">{vg.name}</div>
+                                            </div>
+                                            <div className="flex flex-wrap gap-2">
+                                                <button onClick={() => setShowAllVariants(true)} className={`px-3 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-2 ${showAllVariants ? 'bg-orange-50 text-orange-600 border-orange-300 shadow-sm ring-1 ring-orange-100' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-white hover:border-orange-200 hover:shadow-sm'}`}>ทั้งหมด</button>
+                                                {vg.items.map(iName => {
+                                                    const isActive = !showAllVariants && iName === selectedProduct.name;
+                                                    const vgDeal = groupedDeals.find(d => d.name === iName);
+                                                    if (!vgDeal && !isActive) return null;
+                                                    return (
+                                                        <button key={iName} onClick={() => { if (!isActive && vgDeal) { setSelectedProduct(vgDeal); setShowAllVariants(false); setIsDescriptionExpanded(false); } }}
+                                                            className={`px-3 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-2 ${isActive ? 'bg-orange-50 text-orange-600 border-orange-300 shadow-sm ring-1 ring-orange-100' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-white hover:border-orange-200 hover:shadow-sm'}`}>
+                                                            {vgDeal?.masterImage && <img src={vgDeal.masterImage} className="w-5 h-5 rounded object-cover shadow-sm" />}
+                                                            <span>{iName}</span>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
                             </div>
 
                             <div className="px-4 py-3">
@@ -970,71 +1177,43 @@
                                 <div className="space-y-3">
                                     {productDeals.map(deal => (
                                         <div key={deal.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col gap-2 relative overflow-hidden">
-                                            {deal.id === productDeals[0].id && (
-                                                <div className="absolute top-0 right-0 bg-yellow-400 text-white text-[9px] font-bold px-2 py-0.5 rounded-bl-lg shadow-sm">ถูกที่สุด!</div>
-                                            )}
-
+                                            {deal.id === productDeals[0].id && <div className="absolute top-0 right-0 bg-yellow-400 text-white text-[9px] font-bold px-2 py-0.5 rounded-bl-lg shadow-sm">ถูกที่สุด!</div>}
                                             <div className="flex items-start gap-3">
-                                                <div
-                                                    className="w-16 h-16 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden border border-gray-200 cursor-pointer hover:opacity-80 transition-opacity"
-                                                    onClick={() => { if (deal.image) setZoomedImage(deal.image) }}
-                                                >
+                                                <div className="w-16 h-16 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden border border-gray-200 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => { if (deal.image) setZoomedImage(deal.image) }}>
                                                     {deal.image ? <img src={deal.image} alt={deal.shop} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
                                                 </div>
-
                                                 <div className="flex-1 flex justify-between items-start">
                                                     <div>
                                                         <div className="font-bold text-gray-800 text-base">฿{deal.price} <span className="text-xs font-normal text-gray-500">({deal.unitQuantity} {deal.unitType})</span></div>
                                                         <div className="text-xs font-bold text-orange-500 mt-0.5">ตกชิ้นละ ฿{deal.ppu?.toFixed(2)}</div>
-                                                        {deal.cashbackUsed && <div className="text-[10px] text-green-500 font-bold bg-green-50 px-1 py-0.5 rounded leading-none mt-1 inline-block">หักแคชแบ็กแล้ว</div>}
-                                                        <div className="text-[10px] text-gray-500 mt-1 font-medium">
-                                                            {deal.shippingType === 'excluded' && deal.shippingFee > 0 ? `+ ค่าส่ง ฿${deal.shippingFee}` : 'ส่งฟรี / รวมค่าส่งแล้ว'}
+                                                        <div className="flex flex-wrap gap-1 mt-1">
+                                                            {deal.isMemberPrice && <div className="text-[10px] text-purple-600 font-bold bg-purple-50 px-1.5 py-0.5 rounded leading-none">ราคาสมาชิก</div>}
+                                                            {deal.cashbackUsed && <div className="text-[10px] text-green-500 font-bold bg-green-50 px-1.5 py-0.5 rounded leading-none">หักแคชแบ็กแล้ว</div>}
                                                         </div>
+                                                        <div className="text-[10px] text-gray-500 mt-1 font-medium">{deal.shippingType === 'excluded' && deal.shippingFee > 0 ? `+ ค่าส่ง ฿${deal.shippingFee}` : 'ส่งฟรี / รวมค่าส่งแล้ว'}</div>
                                                         {deal.tags && deal.tags.length > 0 && (
                                                             <div className="flex flex-wrap gap-1 mt-2">
                                                                 {deal.tags.map(tag => (
-                                                                    <span
-                                                                        key={tag}
-                                                                        onClick={(e) => { e.stopPropagation(); setSearchQuery(tag); setCurrentView('search'); }}
-                                                                        className="px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded text-[9px] cursor-pointer hover:bg-gray-200"
-                                                                    >
-                                                                        #{tag}
-                                                                    </span>
+                                                                    <span key={tag} onClick={(e) => { e.stopPropagation(); setSearchQuery(tag); setCurrentView('search'); }} className="px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded text-[9px] cursor-pointer hover:bg-gray-200">#{tag}</span>
                                                                 ))}
                                                             </div>
                                                         )}
                                                     </div>
                                                     <div className="flex flex-col items-end mt-1">
-                                                        <div
-                                                            className={`flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-xl border transition-all ${(() => {
-                                                                const storeMeta = stores.find(s => s.id === deal.shop);
-                                                                return (!storeMeta || storeMeta.isVisible !== false) && deal.shop !== 'ไม่ระบุร้าน'
-                                                                    ? 'bg-white text-gray-700 border-gray-200 cursor-pointer hover:border-orange-300 hover:shadow-sm active:scale-95'
-                                                                    : 'bg-gray-50 text-gray-500 border-gray-100';
-                                                            })()}`}
-                                                            onClick={() => {
-                                                                const storeMeta = stores.find(s => s.id === deal.shop);
-                                                                if ((!storeMeta || storeMeta.isVisible !== false) && deal.shop !== 'ไม่ระบุร้าน') {
-                                                                    setSelectedStore(storeMeta || { id: deal.shop, province: '', phone: '', mapsUrl: '', isVisible: true });
-                                                                }
-                                                            }}
-                                                        >
+                                                        <div className={`flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-xl border transition-all ${(() => { const sm = stores.find(s => s.id === deal.shop); return (!sm || sm.isVisible !== false) && deal.shop !== 'ไม่ระบุร้าน' ? 'bg-white text-gray-700 border-gray-200 cursor-pointer hover:border-orange-300 hover:shadow-sm active:scale-95' : 'bg-gray-50 text-gray-500 border-gray-100'; })()}`}
+                                                            onClick={() => { const sm = stores.find(s => s.id === deal.shop); if ((!sm || sm.isVisible !== false) && deal.shop !== 'ไม่ระบุร้าน') setSelectedStore(sm || { id: deal.shop, province: '', phone: '', mapsUrl: '', isVisible: true }); }}>
                                                             <StoreLogo storeId={deal.shop} size="xs" />
                                                             {deal.shop}
-                                                            {(() => {
-                                                                const storeMeta = stores.find(s => s.id === deal.shop);
-                                                                return storeMeta && storeMeta.isOfficial && <span className="text-[8px] bg-blue-500 text-white px-1 rounded-sm shadow-sm ml-0.5" title="Official Name">★</span>;
-                                                            })()}
+                                                            {(() => { const sm = stores.find(s => s.id === deal.shop); return sm && sm.isOfficial && <span className="text-[8px] bg-blue-500 text-white px-1 rounded-sm shadow-sm ml-0.5">★</span>; })()}
                                                         </div>
                                                         <div className="text-[10px] text-gray-400 mt-2">{deal.timePosted} โดย {deal.reporter}</div>
                                                     </div>
                                                 </div>
                                             </div>
-
                                             <div className="border-t border-gray-50 pt-2 mt-1 flex items-center justify-end">
                                                 <div className="flex items-center gap-3 text-xs text-gray-400">
-                                                    <span onClick={() => alert('กรุณาลงทะเบียนเข้าสู่ระบบเพื่อใช้งานฟังก์ชันนี้')} className="flex items-center gap-1 cursor-pointer hover:text-red-500 transition-colors"><Heart size={14} /> {deal.likes}</span>
-                                                    <span onClick={() => alert('กรุณาลงทะเบียนเข้าสู่ระบบเพื่อใช้งานฟังก์ชันนี้')} className="flex items-center gap-1 cursor-pointer hover:text-blue-500 transition-colors"><MessageSquare size={14} /> {deal.comments}</span>
+                                                    <span onClick={() => !isLoggedIn ? setShowLoginModal(true) : alert('ฟีเจอร์กดถูกใจจะเปิดให้บริการเร็วๆ นี้')} className="flex items-center gap-1 cursor-pointer hover:text-red-500 transition-colors"><Heart size={14} /> {deal.likes}</span>
+                                                    <span onClick={() => !isLoggedIn ? setShowLoginModal(true) : alert('ฟีเจอร์แสดงความคิดเห็นจะเปิดให้บริการเร็วๆ นี้')} className="flex items-center gap-1 cursor-pointer hover:text-blue-500 transition-colors"><MessageSquare size={14} /> {deal.comments}</span>
                                                 </div>
                                             </div>
                                         </div>
@@ -1044,14 +1223,15 @@
                         </div>
 
                         <div className="fixed bottom-[85px] inset-x-0 px-4 max-w-md mx-auto z-20">
-                            <button
-                                onClick={() => {
-                                    setItemName(selectedProduct.name);
-                                    setBrand(selectedProduct.brand || '');
-                                    setCurrentView('add');
-                                }}
-                                className="w-full bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 transform active:scale-95 transition-transform"
-                            >
+                            <button onClick={() => { 
+                                setItemName(selectedProduct.name); 
+                                setBrand(selectedProduct.brand || ''); 
+                                setUnit(selectedProduct.unitQuantity || 1);
+                                setUnitType(selectedProduct.unitType || 'ชิ้น');
+                                setIsItemLocked(true);
+                                setCurrentView('add'); 
+                            }}
+                                className="w-full bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 transform active:scale-95 transition-transform">
                                 <ListPlus size={18} /> บอกต่อราคาใหม่สำหรับสินค้านี้
                             </button>
                         </div>
@@ -1059,175 +1239,78 @@
                 );
             };
 
-            // ===================== STORE DETAIL VIEW =====================
             const renderStoreDetail = () => {
                 if (!selectedStoreForDetail) return null;
-
                 const storeId = selectedStoreForDetail.id;
                 const storeDeals = getStoreDeals(storeId);
                 const top3 = getStoreBestRankedItems(storeId);
-
-                // Filter store items by search
-                const filteredStoreDeals = storeSearchQuery
-                    ? storeDeals.filter(d =>
-                        d.name.toLowerCase().includes(storeSearchQuery.toLowerCase()) ||
-                        (d.brand && d.brand.toLowerCase().includes(storeSearchQuery.toLowerCase())) ||
-                        (d.tags && d.tags.some(t => t.toLowerCase().includes(storeSearchQuery.toLowerCase())))
-                    )
-                    : storeDeals;
-
-                // Deduplicate by name for the full list
-                const seenNames = new Set();
-                const uniqueFilteredDeals = [];
-                for (const d of filteredStoreDeals) {
-                    if (!seenNames.has(d.name)) {
-                        seenNames.add(d.name);
-                        uniqueFilteredDeals.push(d);
-                    }
-                }
-
+                const filteredStoreDeals = storeSearchQuery ? storeDeals.filter(d => d.name.toLowerCase().includes(storeSearchQuery.toLowerCase()) || (d.brand && d.brand.toLowerCase().includes(storeSearchQuery.toLowerCase())) || (d.tags && d.tags.some(t => t.toLowerCase().includes(storeSearchQuery.toLowerCase())))) : storeDeals;
+                const seenNames = new Set(); const uniqueFilteredDeals = [];
+                for (const d of filteredStoreDeals) { if (!seenNames.has(d.name)) { seenNames.add(d.name); uniqueFilteredDeals.push(d); } }
                 const medalColors = ['bg-yellow-400', 'bg-gray-300', 'bg-amber-600'];
                 const medalEmojis = ['🥇', '🥈', '🥉'];
 
                 return (
                     <div className="flex-1 flex flex-col bg-gray-100 overflow-hidden animate-fade-in relative z-0 pb-20">
-                        {/* Header */}
                         <div className="bg-white border-b border-gray-200 shadow-sm z-10 sticky top-0">
                             <div className="p-4 flex items-center gap-3">
-                                <button
-                                    onClick={() => { setCurrentView('feed'); setSelectedStoreForDetail(null); setStoreSearchQuery(''); }}
-                                    className="p-2 -ml-2 text-gray-400 hover:text-gray-600"
-                                >
-                                    <ChevronLeft size={24} />
-                                </button>
+                                <button onClick={() => { setCurrentView('feed'); setSelectedStoreForDetail(null); setStoreSearchQuery(''); }} className="p-2 -ml-2 text-gray-400 hover:text-gray-600"><ChevronLeft size={24} /></button>
                                 <div className="flex-1 min-w-0 flex items-center gap-3">
                                     <StoreLogo storeId={storeId} size="md" />
                                     <div className="min-w-0">
-                                        <div className="flex items-center gap-2">
-                                            <h2 className="text-lg font-bold text-gray-800 truncate">{storeId}</h2>
-                                        </div>
-                                        {selectedStoreForDetail.province && (
-                                            <div className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
-                                                <MapPin size={10} /> {selectedStoreForDetail.province}
-                                            </div>
-                                        )}
+                                        <div className="flex items-center gap-2"><h2 className="text-lg font-bold text-gray-800 truncate">{storeId}</h2></div>
+                                        {selectedStoreForDetail.province && <div className="text-xs text-gray-400 flex items-center gap-1 mt-0.5"><MapPin size={10} /> {selectedStoreForDetail.province}</div>}
                                     </div>
                                 </div>
-                                <div className="flex-shrink-0 text-right">
-                                    <div className="text-lg font-bold text-gray-800">{storeDeals.length}</div>
-                                    <div className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">รายการ</div>
-                                </div>
+                                <div className="flex-shrink-0 text-right"><div className="text-lg font-bold text-gray-800">{storeDeals.length}</div><div className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">รายการ</div></div>
                             </div>
-
-                            {/* Search within store */}
                             <div className="px-4 pb-3">
                                 <div className="relative">
-                                    <input
-                                        type="text"
-                                        placeholder={`ค้นหาสินค้าใน ${storeId}...`}
-                                        value={storeSearchQuery}
-                                        onChange={(e) => setStoreSearchQuery(e.target.value)}
-                                        className="w-full py-2.5 pl-9 pr-4 bg-gray-50 rounded-xl text-sm font-medium text-gray-800 focus:outline-none border-2 border-transparent focus:border-orange-500 transition-colors"
-                                    />
+                                    <input type="text" placeholder={`ค้นหาสินค้าใน ${storeId}...`} value={storeSearchQuery} onChange={(e) => setStoreSearchQuery(e.target.value)}
+                                        className="w-full py-2.5 pl-9 pr-4 bg-gray-50 rounded-xl text-sm font-medium text-gray-800 focus:outline-none border-2 border-transparent focus:border-orange-500 transition-colors" />
                                     <Search className="absolute left-3 top-3 text-gray-400" size={15} />
-                                    {storeSearchQuery && (
-                                        <button onClick={() => setStoreSearchQuery('')} className="absolute right-3 top-3 text-gray-400">
-                                            <X size={15} />
-                                        </button>
-                                    )}
+                                    {storeSearchQuery && <button onClick={() => setStoreSearchQuery('')} className="absolute right-3 top-3 text-gray-400"><X size={15} /></button>}
                                 </div>
                             </div>
                         </div>
 
                         <div className="flex-1 overflow-y-auto">
-                            {/* TOP 3 BEST VALUE SECTION — only shown when not searching */}
                             {!storeSearchQuery && top3.length > 0 && (
                                 <div className="p-4 pb-2">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <Trophy size={16} className="text-yellow-500" />
-                                        <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider">สินค้าคุ้มค่าที่สุดของร้านนี้</h3>
-                                    </div>
+                                    <div className="flex items-center gap-2 mb-3"><Trophy size={16} className="text-yellow-500" /><h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider">สินค้าคุ้มค่าที่สุดของร้านนี้</h3></div>
                                     <p className="text-[10px] text-gray-400 mb-3 -mt-1">เปรียบเทียบกับร้านอื่นๆ ในระบบ</p>
-
-                                    {/* Rank 1 — full width */}
                                     {top3[0] && (
-                                        <div
-                                            onClick={() => {
-                                                const gd = groupedDeals.find(g => g.name === top3[0].name);
-                                                if (gd) { setSelectedProduct(gd); setIsDescriptionExpanded(false); setCurrentView('product_detail'); }
-                                            }}
-                                            className="bg-white rounded-2xl shadow-sm border border-yellow-200 overflow-hidden mb-3 cursor-pointer hover:shadow-md transition-shadow relative"
-                                        >
+                                        <div onClick={() => { const gd = groupedDeals.find(g => g.name === top3[0].name); if (gd) { setSelectedProduct(gd); setIsDescriptionExpanded(false); setCurrentView('product_detail'); } }} className="bg-white rounded-2xl shadow-sm border border-yellow-200 overflow-hidden mb-3 cursor-pointer hover:shadow-md transition-shadow relative">
                                             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-yellow-400 to-orange-400 rounded-t-2xl"></div>
                                             <div className="flex gap-3 p-3 pt-4">
                                                 <div className="relative w-20 h-20 bg-gray-100 rounded-xl overflow-hidden flex-shrink-0 border border-gray-100 shadow-sm">
-                                                    {top3[0].image || top3[0].masterImage
-                                                        ? <img src={top3[0].image || top3[0].masterImage} alt={top3[0].name} className="w-full h-full object-cover" />
-                                                        : <ImagePlaceholder />
-                                                    }
-                                                    <div className="absolute top-0 left-0 w-6 h-6 bg-yellow-400 rounded-br-xl flex items-center justify-center text-[11px] font-bold text-white shadow-sm">
-                                                        1
-                                                    </div>
+                                                    {top3[0].image || top3[0].masterImage ? <img src={top3[0].image || top3[0].masterImage} alt={top3[0].name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
+                                                    <div className="absolute top-0 left-0 w-6 h-6 bg-yellow-400 rounded-br-xl flex items-center justify-center text-[11px] font-bold text-white shadow-sm">1</div>
                                                 </div>
                                                 <div className="flex-1 min-w-0">
-                                                    <div className="flex items-start justify-between gap-2">
-                                                        <h4 className="font-bold text-gray-800 text-sm leading-tight line-clamp-2 flex-1">{top3[0].name}</h4>
-                                                        <span className="text-lg flex-shrink-0">{medalEmojis[0]}</span>
-                                                    </div>
+                                                    <div className="flex items-start justify-between gap-2"><h4 className="font-bold text-gray-800 text-sm leading-tight line-clamp-2 flex-1">{top3[0].name}</h4><span className="text-lg flex-shrink-0">{medalEmojis[0]}</span></div>
                                                     <div className="mt-1.5 flex items-center gap-2 flex-wrap">
-                                                        <span className="text-sm font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-lg border border-orange-100">
-                                                            ฿{top3[0].ppu?.toFixed(2)}/{top3[0].unitType}
-                                                        </span>
-                                                        {top3[0].isCheapestGlobal && (
-                                                            <span className="text-[9px] font-bold bg-green-500 text-white px-1.5 py-0.5 rounded-full">
-                                                                ถูกที่สุดในระบบ!
-                                                            </span>
-                                                        )}
+                                                        <span className="text-sm font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-lg border border-orange-100">฿{top3[0].ppu?.toFixed(2)}/{top3[0].unitType}</span>
+                                                        {top3[0].isCheapestGlobal && <span className="text-[9px] font-bold bg-green-500 text-white px-1.5 py-0.5 rounded-full">ถูกที่สุดในระบบ!</span>}
                                                     </div>
-                                                    <div className="text-[10px] text-gray-400 mt-1.5 font-medium">
-                                                        ฿{top3[0].price} · {top3[0].unitQuantity} {top3[0].unitType}
-                                                    </div>
+                                                    <div className="text-[10px] text-gray-400 mt-1.5 font-medium">฿{top3[0].price} · {top3[0].unitQuantity} {top3[0].unitType}</div>
                                                 </div>
                                             </div>
                                         </div>
                                     )}
-
-                                    {/* Rank 2 & 3 — side by side */}
                                     {top3.length > 1 && (
                                         <div className="grid grid-cols-2 gap-3 mb-3">
                                             {top3.slice(1, 3).map((deal, idx) => (
-                                                <div
-                                                    key={deal.id}
-                                                    onClick={() => {
-                                                        const gd = groupedDeals.find(g => g.name === deal.name);
-                                                        if (gd) { setSelectedProduct(gd); setIsDescriptionExpanded(false); setCurrentView('product_detail'); }
-                                                    }}
-                                                    className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md transition-shadow relative"
-                                                >
+                                                <div key={deal.id} onClick={() => { const gd = groupedDeals.find(g => g.name === deal.name); if (gd) { setSelectedProduct(gd); setIsDescriptionExpanded(false); setCurrentView('product_detail'); } }} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md transition-shadow relative">
                                                     <div className={`h-0.5 ${idx === 0 ? 'bg-gray-300' : 'bg-amber-500'} w-full`}></div>
                                                     <div className="p-2.5">
                                                         <div className="relative aspect-square bg-gray-100 rounded-lg overflow-hidden mb-2 border border-gray-100">
-                                                            {deal.image || deal.masterImage
-                                                                ? <img src={deal.image || deal.masterImage} alt={deal.name} className="w-full h-full object-cover" />
-                                                                : <ImagePlaceholder />
-                                                            }
-                                                            <div className={`absolute top-0 left-0 w-5 h-5 ${medalColors[idx + 1]} rounded-br-lg flex items-center justify-center text-[10px] font-bold text-white shadow-sm`}>
-                                                                {idx + 2}
-                                                            </div>
+                                                            {deal.image || deal.masterImage ? <img src={deal.image || deal.masterImage} alt={deal.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
+                                                            <div className={`absolute top-0 left-0 w-5 h-5 ${medalColors[idx + 1]} rounded-br-lg flex items-center justify-center text-[10px] font-bold text-white shadow-sm`}>{idx + 2}</div>
                                                         </div>
-                                                        <div className="flex items-start justify-between gap-1">
-                                                            <h4 className="font-bold text-gray-800 text-[10px] leading-tight line-clamp-2 flex-1">{deal.name}</h4>
-                                                            <span className="text-sm flex-shrink-0">{medalEmojis[idx + 1]}</span>
-                                                        </div>
-                                                        <div className="mt-1">
-                                                            <span className="text-xs font-bold text-orange-600">฿{deal.ppu?.toFixed(2)}</span>
-                                                            <span className="text-[9px] text-gray-400">/{deal.unitType}</span>
-                                                        </div>
-                                                        {deal.isCheapestGlobal && (
-                                                            <span className="text-[8px] font-bold bg-green-500 text-white px-1 py-0.5 rounded-full mt-1 inline-block">
-                                                                ถูกที่สุด!
-                                                            </span>
-                                                        )}
+                                                        <div className="flex items-start justify-between gap-1"><h4 className="font-bold text-gray-800 text-[10px] leading-tight line-clamp-2 flex-1">{deal.name}</h4><span className="text-sm flex-shrink-0">{medalEmojis[idx + 1]}</span></div>
+                                                        <div className="mt-1"><span className="text-xs font-bold text-orange-600">฿{deal.ppu?.toFixed(2)}</span><span className="text-[9px] text-gray-400">/{deal.unitType}</span></div>
+                                                        {deal.isCheapestGlobal && <span className="text-[8px] font-bold bg-green-500 text-white px-1 py-0.5 rounded-full mt-1 inline-block">ถูกที่สุด!</span>}
                                                     </div>
                                                 </div>
                                             ))}
@@ -1235,48 +1318,20 @@
                                     )}
                                 </div>
                             )}
-
-                            {/* ALL ITEMS LIST */}
                             <div className="px-4 pb-24">
-                                <div className="flex items-center justify-between mb-3">
-                                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">
-                                        {storeSearchQuery ? `ผลการค้นหา (${uniqueFilteredDeals.length})` : `สินค้าทั้งหมด (${uniqueFilteredDeals.length})`}
-                                    </h3>
-                                </div>
-
+                                <div className="flex items-center justify-between mb-3"><h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">{storeSearchQuery ? `ผลการค้นหา (${uniqueFilteredDeals.length})` : `สินค้าทั้งหมด (${uniqueFilteredDeals.length})`}</h3></div>
                                 {uniqueFilteredDeals.length === 0 ? (
-                                    <div className="text-center py-10 flex flex-col items-center">
-                                        <AlertCircle size={36} className="text-gray-300 mb-3" />
-                                        <div className="text-gray-500 text-sm font-medium">ไม่พบสินค้า</div>
-                                        <div className="text-gray-400 text-xs mt-1">ลองเปลี่ยนคำค้นหา</div>
-                                    </div>
+                                    <div className="text-center py-10 flex flex-col items-center"><AlertCircle size={36} className="text-gray-300 mb-3" /><div className="text-gray-500 text-sm font-medium">ไม่พบสินค้า</div></div>
                                 ) : (
                                     <div className="space-y-2">
                                         {uniqueFilteredDeals.map(deal => (
-                                            <div
-                                                key={deal.id}
-                                                onClick={() => {
-                                                    const gd = groupedDeals.find(g => g.name === deal.name);
-                                                    if (gd) { setSelectedProduct(gd); setIsDescriptionExpanded(false); setCurrentView('product_detail'); }
-                                                }}
-                                                className="bg-white p-3 rounded-xl shadow-sm border border-gray-200 flex gap-3 cursor-pointer hover:shadow-md transition-shadow"
-                                            >
-                                                <div className="w-14 h-14 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden border border-gray-100">
-                                                    {deal.image || deal.masterImage
-                                                        ? <img src={deal.image || deal.masterImage} alt={deal.name} className="w-full h-full object-cover" />
-                                                        : <ImagePlaceholder />
-                                                    }
-                                                </div>
+                                            <div key={deal.id} onClick={() => { const gd = groupedDeals.find(g => g.name === deal.name); if (gd) { setSelectedProduct(gd); setIsDescriptionExpanded(false); setCurrentView('product_detail'); } }} className="bg-white p-3 rounded-xl shadow-sm border border-gray-200 flex gap-3 cursor-pointer hover:shadow-md transition-shadow">
+                                                <div className="w-14 h-14 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden border border-gray-100">{deal.image || deal.masterImage ? <img src={deal.image || deal.masterImage} alt={deal.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}</div>
                                                 <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
                                                     <h4 className="font-bold text-gray-800 text-xs leading-tight line-clamp-2">{deal.name}</h4>
                                                     <div className="flex items-center justify-between mt-1">
-                                                        <div>
-                                                            <span className="text-sm font-bold text-gray-800">฿{deal.price}</span>
-                                                            <span className="text-[10px] text-gray-400 ml-1">({deal.unitQuantity} {deal.unitType})</span>
-                                                        </div>
-                                                        <span className="text-[10px] font-bold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded-md border border-orange-100">
-                                                            ฿{deal.ppu?.toFixed(2)}/{deal.unitType}
-                                                        </span>
+                                                        <div><span className="text-sm font-bold text-gray-800">฿{deal.price}</span><span className="text-[10px] text-gray-400 ml-1">({deal.unitQuantity} {deal.unitType})</span></div>
+                                                        <span className="text-[10px] font-bold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded-md border border-orange-100">฿{deal.ppu?.toFixed(2)}/{deal.unitType}</span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -1289,21 +1344,81 @@
                 );
             };
 
+            const renderBrandDetail = () => {
+                if (!selectedBrandForDetail) return null;
+                const brandName = selectedBrandForDetail;
+                const brandDeals = resolvedDeals.filter(d => d.brand === brandName);
+                const bestRanked = getBrandBestRankedItems(brandName);
+                const filteredDeals = brandSearchQuery ? bestRanked.filter(d => d.name.toLowerCase().includes(brandSearchQuery.toLowerCase()) || (d.tags && d.tags.some(t => t.toLowerCase().includes(brandSearchQuery.toLowerCase())))) : bestRanked;
+                const medalColors = ['bg-yellow-400', 'bg-gray-300', 'bg-amber-600'];
+                const medalEmojis = ['🥇', '🥈', '🥉'];
+
+                return (
+                    <div className="flex-1 flex flex-col bg-gray-100 overflow-hidden animate-fade-in relative z-0 pb-20">
+                        <div className="bg-white border-b border-gray-200 shadow-sm z-10 sticky top-0">
+                            <div className="p-4 flex items-center gap-3">
+                                <button onClick={() => { setCurrentView('feed'); setSelectedBrandForDetail(null); setBrandSearchQuery(''); }} className="p-2 -ml-2 text-gray-400 hover:text-gray-600"><ChevronLeft size={24} /></button>
+                                <div className="flex-1 flex items-center gap-2">
+                                    <div className="w-10 h-10 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center font-black"><Tag size={20} /></div>
+                                    <div className="min-w-0"><h2 className="text-lg font-bold text-gray-800 truncate">{brandName}</h2><div className="text-xs text-gray-400 font-medium">{brandDeals.length} โพสต์สำหรับยี่ห้อนี้</div></div>
+                                </div>
+                            </div>
+                            <div className="px-4 pb-3">
+                                <div className="relative">
+                                    <input type="text" placeholder={`ค้นหาสินค้าใน ${brandName}...`} value={brandSearchQuery} onChange={(e) => setBrandSearchQuery(e.target.value)}
+                                        className="w-full bg-gray-100 border-none rounded-2xl py-2.5 pl-10 pr-4 text-sm font-medium focus:ring-2 focus:ring-orange-200 focus:bg-white transition-all shadow-inner" />
+                                    <Search size={16} className="absolute left-3 top-3 text-gray-400" />
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+                            {filteredDeals.map((deal, index) => {
+                                const isBestChoices = index < 3;
+                                return (
+                                    <div key={deal.id} onClick={() => { setSelectedProduct(deal); setCurrentView('product_detail'); }} className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-3 hover:shadow-md transition-shadow relative overflow-hidden cursor-pointer group">
+                                        {isBestChoices && <div className={`absolute top-0 right-0 w-8 h-8 rounded-bl-xl flex items-center justify-center text-[10px] font-bold shadow-sm z-10 opacity-90 ${medalColors[index]} text-white`}>{medalEmojis[index]} {index + 1}</div>}
+                                        <div className="w-16 h-16 bg-gray-50 rounded-xl overflow-hidden flex-shrink-0 border border-gray-100 relative shadow-inner">{deal.masterImage ? <img src={deal.masterImage} alt={deal.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}</div>
+                                        <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                            <h3 className="font-bold text-gray-800 text-sm leading-tight line-clamp-2 pr-6 group-hover:text-orange-600 transition-colors">{deal.name}</h3>
+                                            <div className="flex items-center gap-2 mt-1.5">
+                                                <div className="text-xs font-black text-orange-600 bg-orange-50 px-2 py-0.5 rounded shadow-sm border border-orange-100 whitespace-nowrap">฿{deal.ppu.toFixed(2)}<span className="text-[9px] text-orange-400 font-bold">/{deal.unitType || 'unit'}</span></div>
+                                                <div className="text-[10px] text-gray-400 font-bold flex items-baseline gap-0.5 min-w-0"><span className="truncate">{deal.shop}</span></div>
+                                            </div>
+                                        </div>
+                                        <div className="text-gray-300 group-hover:text-orange-400 transition-colors ml-1"><ChevronRight size={16} /></div>
+                                    </div>
+                                );
+                            })}
+                            {filteredDeals.length === 0 && (
+                                <div className="text-center p-8 bg-white rounded-2xl border border-gray-100 shadow-sm mt-4">
+                                    <div className="text-4xl mb-3">🔍</div>
+                                    <h3 className="font-bold text-gray-800 mb-1">ไม่พบสินค้า</h3>
+                                    <p className="text-xs text-gray-500 font-medium leading-relaxed">ลองใช้คำค้นหาอื่นที่กว้างขึ้น</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            };
+
             return (
                 <div className="min-h-screen bg-gray-900 flex justify-center font-sans">
                     <div className="w-full max-w-md bg-gray-100 shadow-2xl relative overflow-hidden flex flex-col h-[100dvh]">
 
-                        {/* Header — hidden on store_detail (it has its own) */}
-                        {currentView !== 'store_detail' && (
+                        {currentView !== 'store_detail' && currentView !== 'brand_detail' && (
                             <header className="bg-green-500 text-white p-4 rounded-b-2xl shadow-md z-10 flex-none">
                                 <div className="flex justify-between items-center mb-3">
-                                    <h1 className="text-2xl font-bold flex items-center gap-2">
-                                        <Zap className="fill-current" /> DealHunter
-                                    </h1>
-                                    <div onClick={() => alert('กรุณาลงทะเบียนเข้าสู่ระบบเพื่อใช้งานฟังก์ชันนี้')} className="flex items-center gap-2 bg-black/20 hover:bg-black/30 cursor-pointer transition-colors px-3 py-1 rounded-full backdrop-blur-sm">
-                                        <User size={16} className="text-white" />
-                                        <span className="text-sm font-medium">เข้าสู่ระบบ</span>
-                                    </div>
+                                    <h1 className="text-2xl font-bold flex items-center gap-2"><Zap className="fill-current" /> DealHunter</h1>
+                                    {isLoggedIn ? (
+                                        <div onClick={() => setCurrentView('profile')} className="flex items-center gap-2 bg-black/20 hover:bg-black/30 cursor-pointer transition-colors px-3 py-1 rounded-full backdrop-blur-sm">
+                                            {userPhotoURL ? <img src={userPhotoURL} alt={userDisplayName} className="w-6 h-6 rounded-full border border-white/30" /> : <User size={16} className="text-white" />}
+                                            <span className="text-sm font-medium truncate max-w-[100px]">{isGuestUser ? 'Guest' : userDisplayName.split(' ')[0]}</span>
+                                        </div>
+                                    ) : (
+                                        <div onClick={() => setShowLoginModal(true)} className="flex items-center gap-2 bg-black/20 hover:bg-black/30 cursor-pointer transition-colors px-3 py-1 rounded-full backdrop-blur-sm">
+                                            <User size={16} className="text-white" /><span className="text-sm font-medium">เข้าสู่ระบบ</span>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="text-sm font-medium text-white/80 animate-fade-in flex items-center gap-1">
                                     {currentView === 'feed' && <><Home size={16} /> หน้าแรก</>}
@@ -1315,61 +1430,65 @@
                             </header>
                         )}
 
-                        {/* Main Content */}
                         {currentView === 'feed' && renderFeed()}
                         {currentView === 'search' && renderSearch()}
                         {currentView === 'add' && renderAddDeal()}
                         {currentView === 'profile' && renderProfile()}
                         {currentView === 'product_detail' && renderProductDetail()}
                         {currentView === 'store_detail' && renderStoreDetail()}
+                        {currentView === 'brand_detail' && renderBrandDetail()}
 
-                        {/* FAB */}
                         {currentView === 'feed' && (
-                            <button
-                                onClick={() => setCurrentView('add')}
-                                className="absolute bottom-20 right-6 bg-gradient-to-br from-green-400 to-green-600 text-white p-4 rounded-full shadow-lg shadow-green-200 hover:scale-105 transform transition-all flex items-center justify-center z-20 border-2 border-white"
-                            >
+                            <button onClick={() => setCurrentView('add')} className="absolute bottom-20 right-6 bg-gradient-to-br from-green-400 to-green-600 text-white p-4 rounded-full shadow-lg shadow-green-200 hover:scale-105 transform transition-all flex items-center justify-center z-20 border-2 border-white">
                                 <Plus size={24} />
                             </button>
                         )}
 
-                        {/* Bottom Nav — hidden on store_detail */}
-                        {currentView !== 'store_detail' && (
+                        {currentView !== 'store_detail' && currentView !== 'brand_detail' && (
                             <nav className="absolute bottom-0 w-full bg-white border-t border-gray-200 flex justify-around py-3 pb-safe z-30 text-xs text-gray-500 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
-                                <button onClick={() => setCurrentView('feed')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'feed' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}>
-                                    <Home size={20} className={currentView === 'feed' ? 'fill-current' : ''} /> หน้าแรก
-                                </button>
-                                <button onClick={() => setCurrentView('search')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'search' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}>
-                                    <Search size={20} /> ค้นหา
-                                </button>
-                                <button onClick={() => setCurrentView('add')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'add' ? 'text-green-500 font-bold' : 'hover:text-green-400'}`}>
-                                    <ListPlus size={20} /> บอกต่อ
-                                </button>
-                                <button onClick={() => setCurrentView('profile')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'profile' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}>
-                                    <User size={20} className={currentView === 'profile' ? 'fill-current' : ''} /> โปรไฟล์
-                                </button>
+                                <button onClick={() => setCurrentView('feed')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'feed' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}><Home size={20} className={currentView === 'feed' ? 'fill-current' : ''} /> หน้าแรก</button>
+                                <button onClick={() => { setCurrentView('search'); setActiveCategoryFilter(null); }} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'search' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}><Search size={20} /> ค้นหา</button>
+                                <button onClick={() => setCurrentView('add')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'add' ? 'text-green-500 font-bold' : 'hover:text-green-400'}`}><ListPlus size={20} /> บอกต่อ</button>
+                                <button onClick={() => setCurrentView('profile')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'profile' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}><User size={20} className={currentView === 'profile' ? 'fill-current' : ''} /> โปรไฟล์</button>
                             </nav>
                         )}
 
-                        {/* POST CONFIRMATION MODAL */}
+                        {/* LOGIN MODAL */}
+                        {showLoginModal && (
+                            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-6 animate-fade-in" onClick={() => setShowLoginModal(false)}>
+                                <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl relative" onClick={e => e.stopPropagation()}>
+                                    <button onClick={() => setShowLoginModal(false)} className="absolute top-4 right-4 w-8 h-8 bg-gray-100 text-gray-400 rounded-full flex items-center justify-center hover:bg-gray-200 transition-colors z-10"><X size={20} /></button>
+                                    <div className="p-8 pb-4 flex flex-col items-center border-b border-gray-50 bg-green-50/50">
+                                        <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center text-green-500 mb-4 shadow-sm border border-green-100"><Zap size={40} className="fill-current" /></div>
+                                        <h2 className="text-xl font-bold text-gray-800 text-center">เข้าสู่ระบบ DealHunter</h2>
+                                        <p className="text-xs text-gray-500 mt-1 font-medium text-center">เลือกวิธีเข้าสู่ระบบ</p>
+                                    </div>
+                                    <div className="p-6 space-y-3">
+                                        <button onClick={handleGoogleLogin} className="w-full py-3.5 bg-white border-2 border-gray-200 hover:bg-gray-50 text-gray-700 rounded-2xl font-bold text-sm transition-colors flex items-center justify-center gap-3 active:scale-95">
+                                            <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" /><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" /><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" /><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" /></svg>
+                                            เข้าสู่ระบบด้วย Google
+                                        </button>
+                                        <div className="flex items-center gap-3 my-4"><div className="flex-1 h-px bg-gray-200"></div><span className="text-xs text-gray-400 font-medium">หรือ</span><div className="flex-1 h-px bg-gray-200"></div></div>
+                                        <button onClick={handleGuestLogin} className="w-full py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-2xl font-bold text-sm transition-colors flex items-center justify-center gap-2 active:scale-95"><User size={18} /> เข้าใช้งานแบบผู้เยี่ยมชม (Guest)</button>
+                                        <p className="text-[10px] text-gray-400 text-center mt-3 leading-relaxed">Guest สามารถใช้งานได้ทุกฟังก์ชัน<br />แต่ข้อมูลจะไม่ถูกบันทึกข้ามอุปกรณ์</p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* CONFIRM MODAL */}
                         {showConfirmModal && (
                             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-6 animate-fade-in" onClick={() => setShowConfirmModal(false)}>
                                 <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl relative" onClick={e => e.stopPropagation()}>
-                                    <button onClick={() => setShowConfirmModal(false)} className="absolute top-4 right-4 w-8 h-8 bg-gray-100 text-gray-400 rounded-full flex items-center justify-center hover:bg-gray-200 transition-colors z-10">
-                                        <X size={20} />
-                                    </button>
+                                    <button onClick={() => setShowConfirmModal(false)} className="absolute top-4 right-4 w-8 h-8 bg-gray-100 text-gray-400 rounded-full flex items-center justify-center hover:bg-gray-200 transition-colors z-10"><X size={20} /></button>
                                     <div className="p-8 pb-4 flex flex-col items-center border-b border-gray-50 bg-green-50/50">
-                                        <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center text-green-500 mb-4 shadow-sm border border-green-100">
-                                            <ListPlus size={40} />
-                                        </div>
+                                        <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center text-green-500 mb-4 shadow-sm border border-green-100"><ListPlus size={40} /></div>
                                         <h2 className="text-xl font-bold text-gray-800 text-center uppercase tracking-tight">ยืนยันข้อมูลบอกต่อ</h2>
                                         <p className="text-xs text-gray-500 mt-1 font-medium italic">ตรวจสอบความถูกต้องก่อนบันทึก</p>
                                     </div>
                                     <div className="p-6 space-y-4">
                                         <div className="flex gap-4 items-center mb-2">
-                                            <div className="w-16 h-16 rounded-xl border border-gray-100 flex-shrink-0 overflow-hidden bg-gray-50 shadow-sm">
-                                                {imageBase64 ? <img src={imageBase64} alt="Preview" className="w-full h-full object-cover" /> : <ImagePlaceholder />}
-                                            </div>
+                                            <div className="w-16 h-16 rounded-xl border border-gray-100 flex-shrink-0 overflow-hidden bg-gray-50 shadow-sm">{imageBase64 ? <img src={imageBase64} alt="Preview" className="w-full h-full object-cover" /> : <ImagePlaceholder />}</div>
                                             <div className="flex-1 min-w-0">
                                                 <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">สินค้า</div>
                                                 <div className="text-sm font-bold text-gray-800 truncate">{itemName}</div>
@@ -1377,137 +1496,92 @@
                                             </div>
                                         </div>
                                         <div className="grid grid-cols-2 gap-3">
-                                            <div className="p-3 bg-gray-50 rounded-2xl border border-gray-100">
-                                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1 text-center">ราคา {unit} {unitType}</div>
-                                                <div className="text-lg font-bold text-gray-800 text-center">฿{numPrice}</div>
-                                            </div>
-                                            <div className="p-3 bg-orange-50 rounded-2xl border border-orange-100">
-                                                <div className="text-[10px] font-bold text-orange-400 uppercase tracking-widest mb-1 text-center">คุ้มสุดที่ (PPU)</div>
-                                                <div className="text-lg font-bold text-orange-600 text-center">฿{ppu.toFixed(2)}</div>
-                                            </div>
+                                            <div className="p-3 bg-gray-50 rounded-2xl border border-gray-100"><div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1 text-center">ราคา {unit} {unitType}</div><div className="text-lg font-bold text-gray-800 text-center">฿{numPrice}</div></div>
+                                            <div className="p-3 bg-orange-50 rounded-2xl border border-orange-100"><div className="text-[10px] font-bold text-orange-400 uppercase tracking-widest mb-1 text-center">คุ้มสุดที่ (PPU)</div><div className="text-lg font-bold text-orange-600 text-center">฿{ppu.toFixed(2)}</div></div>
                                         </div>
                                         <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-2xl border border-gray-100">
-                                            <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center border border-gray-100 overflow-hidden flex-shrink-0">
-                                                {(() => {
-                                                    const meta = stores.find(s => s.id === store);
-                                                    return meta?.logoUrl
-                                                        ? <img src={meta.logoUrl} alt={store} className="w-full h-full object-contain p-0.5" />
-                                                        : <Store size={20} className="text-orange-400" />;
-                                                })()}
-                                            </div>
-                                            <div>
-                                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">สถานที่ / ร้านค้า</div>
-                                                <div className="text-sm font-bold text-gray-700">{store || 'ไม่ระบุร้าน'}</div>
-                                            </div>
+                                            <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center border border-gray-100 overflow-hidden flex-shrink-0">{(() => { const meta = stores.find(s => s.id === store); return meta?.logoUrl ? <img src={meta.logoUrl} alt={store} className="w-full h-full object-contain p-0.5" /> : <Store size={20} className="text-orange-400" />; })()}</div>
+                                            <div><div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">สถานที่ / ร้านค้า</div><div className="text-sm font-bold text-gray-700">{store || 'ไม่ระบุร้าน'}</div></div>
                                         </div>
-                                        <button onClick={executeSaveDeal} className="w-full py-4 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-2xl font-bold text-lg shadow-lg shadow-green-200 active:scale-95 transition-all mt-2 flex items-center justify-center gap-2">
-                                            <ListPlus size={20} /> ยืนยันบอกต่อ!
-                                        </button>
+                                        <button onClick={executeSaveDeal} className="w-full py-4 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-2xl font-bold text-lg shadow-lg shadow-green-200 active:scale-95 transition-all mt-2 flex items-center justify-center gap-2"><ListPlus size={20} /> ยืนยันบอกต่อ!</button>
                                     </div>
                                     <div className="h-4"></div>
                                 </div>
                             </div>
                         )}
 
-                        {/* IMAGE ZOOM MODAL */}
+                        {/* IMAGE ZOOM */}
                         {zoomedImage && (
                             <div className="absolute inset-0 bg-black/90 z-50 flex items-center justify-center backdrop-blur-sm animate-fade-in" onClick={() => setZoomedImage(null)}>
-                                <button className="absolute top-6 right-6 text-white/50 hover:text-white bg-black/30 w-10 h-10 rounded-full flex items-center justify-center transition-colors">
-                                    <X size={24} />
-                                </button>
+                                <button className="absolute top-6 right-6 text-white/50 hover:text-white bg-black/30 w-10 h-10 rounded-full flex items-center justify-center transition-colors"><X size={24} /></button>
                                 <img src={zoomedImage} alt="Zoomed View" className="w-[90%] max-h-[80%] object-contain rounded-xl shadow-2xl" onClick={e => e.stopPropagation()} />
                             </div>
                         )}
 
-                        {/* STORE DETAIL MODAL */}
+                        {/* STORE MINI MODAL */}
                         {selectedStore && (
                             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-6 animate-fade-in" onClick={() => setSelectedStore(null)}>
                                 <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl relative" onClick={e => e.stopPropagation()}>
-                                    <button onClick={() => setSelectedStore(null)} className="absolute top-4 right-4 w-8 h-8 bg-gray-100 text-gray-400 rounded-full flex items-center justify-center hover:bg-gray-200 transition-colors">
-                                        <X size={20} />
-                                    </button>
-
+                                    <button onClick={() => setSelectedStore(null)} className="absolute top-4 right-4 w-8 h-8 bg-gray-100 text-gray-400 rounded-full flex items-center justify-center hover:bg-gray-200 transition-colors"><X size={20} /></button>
                                     <div className="p-8 pb-4 flex flex-col items-center border-b border-gray-50">
-                                        {/* Logo: large if available, icon-only fallback */}
-                                        {(() => {
-                                            const meta = stores.find(s => s.id === selectedStore.id);
-                                            return meta?.logoUrl ? (
-                                                <div className="w-24 h-16 bg-white rounded-2xl border border-gray-100 shadow-sm flex items-center justify-center overflow-hidden mb-4 p-2">
-                                                    <img src={meta.logoUrl} alt={selectedStore.id} className="w-full h-full object-contain" />
-                                                </div>
-                                            ) : (
-                                                <div className="w-20 h-20 bg-orange-50 rounded-2xl flex items-center justify-center text-orange-500 mb-4 shadow-inner">
-                                                    <Store size={40} />
-                                                </div>
-                                            );
-                                        })()}
+                                        {(() => { const meta = stores.find(s => s.id === selectedStore.id); return meta?.logoUrl ? <div className="w-24 h-16 bg-white rounded-2xl border border-gray-100 shadow-sm flex items-center justify-center overflow-hidden mb-4 p-2"><img src={meta.logoUrl} alt={selectedStore.id} className="w-full h-full object-contain" /></div> : <div className="w-20 h-20 bg-orange-50 rounded-2xl flex items-center justify-center text-orange-500 mb-4 shadow-inner"><Store size={40} /></div>; })()}
                                         <h2 className="text-2xl font-bold text-gray-800 text-center">{selectedStore.id}</h2>
                                     </div>
-
                                     <div className="p-6 space-y-4">
-                                        {/* Item count */}
-                                        <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-2xl border border-gray-100">
-                                            <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-green-500 border border-gray-100">
-                                                <ShoppingBag size={20} />
-                                            </div>
-                                            <div>
-                                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">สินค้าในระบบ</div>
-                                                <div className="text-sm font-bold text-gray-700">
-                                                    {getStoreDeals(selectedStore.id).length} รายการ
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-2xl border border-gray-100">
-                                            <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-gray-400 border border-gray-100">
-                                                <MapPin size={20} />
-                                            </div>
-                                            <div>
-                                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">จังหวัด</div>
-                                                <div className="text-sm font-bold text-gray-700">{selectedStore.province || 'ไม่ระบุ'}</div>
-                                            </div>
-                                        </div>
-
-                                        <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-2xl border border-gray-100">
-                                            <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-gray-400 border border-gray-100">
-                                                <Zap size={20} />
-                                            </div>
-                                            <div>
-                                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">เบอร์โทรศัพท์</div>
-                                                {selectedStore.phone ? (
-                                                    <a href={`tel:${selectedStore.phone}`} className="text-sm font-bold text-blue-500 hover:underline">{selectedStore.phone}</a>
-                                                ) : (
-                                                    <div className="text-sm font-bold text-gray-700">ไม่ระบุ</div>
-                                                )}
-                                            </div>
-                                        </div>
-
-                                        {/* View all store items button */}
-                                        {getStoreDeals(selectedStore.id).length > 0 && (
-                                            <button
-                                                onClick={() => {
-                                                    setSelectedStoreForDetail(selectedStore);
-                                                    setStoreSearchQuery('');
-                                                    setSelectedStore(null);
-                                                    setCurrentView('store_detail');
-                                                }}
-                                                className="w-full py-3.5 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-2xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-orange-100 active:scale-95 transition-all"
-                                            >
-                                                <Store size={16} /> ดูสินค้าทั้งหมดของร้านนี้
-                                            </button>
-                                        )}
-
-                                        {selectedStore.mapsUrl && (
-                                            <a
-                                                href={selectedStore.mapsUrl}
-                                                target="_blank"
-                                                className="w-full py-3.5 bg-slate-900 text-white rounded-2xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-gray-400 active:scale-95 transition-all"
-                                            >
-                                                <MapPin size={16} /> ดูแผนที่บน Google Maps
-                                            </a>
-                                        )}
+                                        <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-2xl border border-gray-100"><div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-green-500 border border-gray-100"><ShoppingBag size={20} /></div><div><div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">สินค้าในระบบ</div><div className="text-sm font-bold text-gray-700">{getStoreDeals(selectedStore.id).length} รายการ</div></div></div>
+                                        <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-2xl border border-gray-100"><div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-gray-400 border border-gray-100"><MapPin size={20} /></div><div><div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">จังหวัด</div><div className="text-sm font-bold text-gray-700">{selectedStore.province || 'ไม่ระบุ'}</div></div></div>
+                                        <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-2xl border border-gray-100"><div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-gray-400 border border-gray-100"><Zap size={20} /></div><div><div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">เบอร์โทรศัพท์</div>{selectedStore.phone ? <a href={`tel:${selectedStore.phone}`} className="text-sm font-bold text-blue-500 hover:underline">{selectedStore.phone}</a> : <div className="text-sm font-bold text-gray-700">ไม่ระบุ</div>}</div></div>
+                                        {getStoreDeals(selectedStore.id).length > 0 && <button onClick={() => { setSelectedStoreForDetail(selectedStore); setStoreSearchQuery(''); setSelectedStore(null); setCurrentView('store_detail'); }} className="w-full py-3.5 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-2xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-orange-100 active:scale-95 transition-all"><Store size={16} /> ดูสินค้าทั้งหมดของร้านนี้</button>}
+                                        {selectedStore.mapsUrl && <a href={selectedStore.mapsUrl} target="_blank" className="w-full py-3.5 bg-slate-900 text-white rounded-2xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-gray-400 active:scale-95 transition-all"><MapPin size={16} /> ดูแผนที่บน Google Maps</a>}
                                     </div>
                                     <div className="h-6"></div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* REPORT MODAL */}
+                        {showReportModal && (
+                            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4 animate-fade-in">
+                                <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
+                                    <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+                                        <div className="flex items-center gap-2 text-gray-800">
+                                            <svg className="w-5 h-5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                                            <h2 className="font-bold text-lg">รายงานปัญหา / เสนอแนะ</h2>
+                                        </div>
+                                        <button onClick={() => setShowReportModal(false)} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500"><X size={20} /></button>
+                                    </div>
+                                    <div className="p-5 overflow-y-auto max-h-[70vh]">
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="block text-sm font-bold text-gray-700 mb-1">รายละเอียด</label>
+                                                <textarea value={reportText} onChange={(e) => setReportText(e.target.value)} placeholder="พิมพ์ปัญหาหรือข้อเสนอแนะที่นี่..." className="w-full p-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none h-28 resize-none" />
+                                            </div>
+                                            <div>
+                                                <div className="flex justify-between items-center mb-1"><label className="block text-sm font-bold text-gray-700">แนบรูปภาพ</label><span className="text-xs text-gray-400 font-medium">{reportImages.length}/2 รูป</span></div>
+                                                <div className="flex gap-2 mb-2">
+                                                    {reportImages.map((img, idx) => (
+                                                        <div key={idx} className="relative w-20 h-20 rounded-xl overflow-hidden border border-gray-200 bg-gray-50">
+                                                            <img src={img} alt={`Report ${idx}`} className="w-full h-full object-cover" />
+                                                            <button onClick={() => setReportImages(reportImages.filter((_, i) => i !== idx))} className="absolute top-1 right-1 bg-black/50 text-white rounded-full p-1 w-6 h-6 flex items-center justify-center backdrop-blur hover:bg-black/70 transition-colors"><X size={12} /></button>
+                                                        </div>
+                                                    ))}
+                                                    {reportImages.length < 2 && (
+                                                        <label className="w-20 h-20 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center text-gray-400 hover:bg-gray-50 hover:border-gray-400 hover:text-gray-500 cursor-pointer transition-colors shrink-0">
+                                                            <Camera size={20} className="mb-1" /><span className="text-[10px] font-bold">เพิ่มรูป</span>
+                                                            <input type="file" accept="image/*" multiple onChange={handleReportImageUpload} className="hidden" />
+                                                        </label>
+                                                    )}
+                                                </div>
+                                                <p className="text-[10px] text-gray-400 leading-tight">รองรับไฟล์ภาพสูงสุด 2 รูปภาพ สำหรับอธิบายปัญหาหรือหน้าจอของคุณ</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="p-4 border-t border-gray-100 bg-gray-50 flex gap-3">
+                                        <button onClick={() => setShowReportModal(false)} className="flex-1 py-3 bg-white text-gray-700 rounded-xl font-bold text-sm border border-gray-200 shadow-sm hover:bg-gray-50 active:scale-95 transition-all">ยกเลิก</button>
+                                        <button onClick={handleSubmitReport} disabled={isSubmittingReport || (!reportText.trim() && reportImages.length === 0)} className="flex-1 py-3 bg-orange-500 text-white rounded-xl font-bold text-sm shadow-md shadow-orange-200 hover:bg-orange-600 active:scale-95 transition-all disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
+                                            {isSubmittingReport ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <>ส่งรายงาน</>}
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         )}
