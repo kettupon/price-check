@@ -104,7 +104,7 @@
             Grid, Folder, Bell, Clock, Link2, MoreVertical, Flag, CheckCircle2, XCircle, Edit3, Lock, Shield
         } from 'lucide-react';
         import { initializeApp } from 'firebase/app';
-        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDocs, updateDoc, where, doc, setDoc, increment, deleteDoc, getDoc } from 'firebase/firestore';
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDocs, updateDoc, where, doc, setDoc, increment, deleteDoc, getDoc, collectionGroup } from 'firebase/firestore';
         import { getAuth, signInWithPopup, linkWithPopup, GoogleAuthProvider, signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth';
 
         const firebaseConfig = {
@@ -204,7 +204,11 @@
                 try {
                     const ref = doc(db, "items", itemId, "likes", currentUser.uid);
                     if (prevLiked) await deleteDoc(ref);
-                    else await setDoc(ref, { likedAt: new Date().toISOString() });
+                    else await setDoc(ref, { 
+                        likedAt: new Date().toISOString(),
+                        userId: currentUser.uid,
+                        itemId: itemId
+                    });
                 } catch (e) {
                     console.error("Error toggling like:", e);
                     setIsLiked(prevLiked);
@@ -212,6 +216,211 @@
                 }
             };
             return { count, isLiked, toggleLike };
+        };
+
+        const useUserLikes = (currentUser) => {
+            const [likedItemIds, setLikedItemIds] = useState([]);
+            const [loadingLikes, setLoadingLikes] = useState(true);
+
+            useEffect(() => {
+                if (!currentUser || currentUser.isAnonymous) {
+                    setLikedItemIds([]);
+                    setLoadingLikes(false);
+                    return;
+                }
+                const q = query(
+                    collectionGroup(db, 'likes'),
+                    where('userId', '==', currentUser.uid),
+                    orderBy('likedAt', 'desc')
+                );
+                const unsub = onSnapshot(q, (snapshot) => {
+                    const ids = [];
+                    snapshot.forEach(doc => {
+                        if (doc.data().itemId) ids.push(doc.data().itemId);
+                    });
+                    setLikedItemIds(ids);
+                    setLoadingLikes(false);
+                }, (error) => {
+                    console.error("Error fetching likes:", error);
+                    setLoadingLikes(false);
+                });
+                return () => unsub();
+            }, [currentUser]);
+
+            return { likedItemIds, loadingLikes };
+        };
+
+        const useComments = (itemId) => {
+            const [comments, setComments] = useState([]);
+            const [loadingComments, setLoadingComments] = useState(true);
+
+            useEffect(() => {
+                if (!itemId) {
+                    setComments([]);
+                    setLoadingComments(false);
+                    return;
+                }
+                const q = query(
+                    collection(db, "items", itemId, "comments"),
+                    orderBy("createdAt", "asc")
+                );
+                const unsub = onSnapshot(q, (snapshot) => {
+                    const loaded = [];
+                    snapshot.forEach(doc => {
+                        const data = doc.data();
+                        if (!data.deleted) {
+                            loaded.push({ id: doc.id, ...data });
+                        }
+                    });
+                    setComments(loaded.slice(-30)); // limit to 30 on client for ease
+                    setLoadingComments(false);
+                }, (err) => {
+                    console.error("Error fetching comments:", err);
+                    setLoadingComments(false);
+                });
+                return () => unsub();
+            }, [itemId]);
+
+            const addComment = async (text, currentUser) => {
+                if (!currentUser || currentUser.isAnonymous) throw new Error('Not logged in');
+                try {
+                    await addDoc(collection(db, "items", itemId, "comments"), {
+                        text,
+                        userId: currentUser.uid,
+                        userDisplayName: currentUser.displayName || 'ผู้ใช้',
+                        userPhotoURL: currentUser.photoURL || null,
+                        createdAt: new Date().toISOString(),
+                        deleted: false
+                    });
+                    await updateDoc(doc(db, "items", itemId), { comments: increment(1) });
+                } catch (e) {
+                    console.error("Error adding comment:", e);
+                    throw e;
+                }
+            };
+
+            const deleteComment = async (commentId, userId, currentUser) => {
+                if (!currentUser || currentUser.uid !== userId) throw new Error('Unauthorized');
+                try {
+                    await updateDoc(doc(db, "items", itemId, "comments", commentId), { deleted: true });
+                    await updateDoc(doc(db, "items", itemId), { comments: increment(-1) });
+                } catch (e) {
+                    console.error("Error deleting comment:", e);
+                    throw e;
+                }
+            };
+
+            return { comments, loadingComments, addComment, deleteComment };
+        };
+
+        const CommentSection = ({ itemId, currentUser, setShowLoginModal, expanded, setExpanded }) => {
+            const { comments, loadingComments, addComment, deleteComment } = useComments(expanded ? itemId : null);
+            const [newComment, setNewComment] = useState('');
+            const [submitting, setSubmitting] = useState(false);
+            const listRef = useRef(null);
+
+            useEffect(() => {
+                if (expanded && listRef.current) {
+                    listRef.current.scrollTop = listRef.current.scrollHeight;
+                }
+            }, [comments, expanded]);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                if (!newComment.trim() || submitting) return;
+                if (!currentUser || currentUser.isAnonymous) {
+                    setShowLoginModal(true);
+                    return;
+                }
+                setSubmitting(true);
+                try {
+                    await addComment(newComment.trim(), currentUser);
+                    setNewComment('');
+                } catch (e) {
+                    alert('เกิดข้อผิดพลาดในการส่งความเห็น: ' + e.message);
+                }
+                setSubmitting(false);
+            };
+
+            const handleDelete = async (commentId, userId) => {
+                if (!confirm("ต้องการลบความคิดเห็นนี้หรือไม่?")) return;
+                try {
+                    await deleteComment(commentId, userId, currentUser);
+                } catch (e) {
+                    alert('ลบไม่สำเร็จ: ' + e.message);
+                }
+            };
+
+            if (!expanded) return null;
+
+            return (
+                <div className="bg-gray-50 border-t border-gray-100 p-3 pt-4 flex flex-col mt-2">
+                    {loadingComments ? (
+                        <div className="text-center py-4 text-xs text-gray-400">กำลังโหลด...</div>
+                    ) : (
+                        <div ref={listRef} className="max-h-[300px] overflow-y-auto space-y-3 mb-3 pr-2 custom-scrollbar">
+                            {comments.length === 0 ? (
+                                <div className="text-center py-4 text-xs text-gray-400 italic">ยังไม่มีความคิดเห็น มาร่วมเป็นคนแรกเลย!</div>
+                            ) : (
+                                comments.map(c => (
+                                    <div key={c.id} className="flex gap-2 group animate-fade-in">
+                                        {c.userPhotoURL ? (
+                                            <img src={c.userPhotoURL} alt={c.userDisplayName} className="w-6 h-6 rounded-full object-cover shadow-sm bg-white shrink-0 mt-0.5" />
+                                        ) : (
+                                            <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center shrink-0 mt-0.5"><User size={12} className="text-gray-400" /></div>
+                                        )}
+                                        <div className="flex-1 min-w-0 bg-white p-2.5 rounded-2xl rounded-tl-none shadow-sm border border-gray-100 relative">
+                                            <div className="flex justify-between items-start gap-2 mb-1">
+                                                <span className="font-bold text-[11px] text-gray-700 truncate">{c.userDisplayName}</span>
+                                                <span className="text-[9px] text-gray-400 shrink-0">{new Date(c.createdAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</span>
+                                            </div>
+                                            <p className="text-xs text-gray-800 whitespace-pre-wrap leading-relaxed break-words">{c.text}</p>
+                                            
+                                            {currentUser && currentUser.uid === c.userId && (
+                                                <button onClick={() => handleDelete(c.id, c.userId)} className="absolute -right-2 -top-2 w-6 h-6 bg-white border border-gray-200 rounded-full flex items-center justify-center text-red-400 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50 hover:text-red-600 shadow-sm">
+                                                    <X size={12} />
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    )}
+
+                    <form onSubmit={handleSubmit} className="flex gap-2 items-end pt-2 border-t border-gray-200">
+                        {currentUser && !currentUser.isAnonymous && currentUser.photoURL ? (
+                            <img src={currentUser.photoURL} className="w-8 h-8 rounded-full border border-gray-200 shrink-0" />
+                        ) : (
+                            <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center shrink-0"><User size={16} className="text-gray-400" /></div>
+                        )}
+                        <div className="flex-1 relative">
+                            {(!currentUser || currentUser.isAnonymous) ? (
+                                <div onClick={() => setShowLoginModal(true)} className="w-full bg-white border border-gray-200 rounded-2xl p-2.5 text-xs text-gray-400 cursor-pointer shadow-sm text-center font-bold pb-3">เข้าสู่ระบบเพื่อแสดงความเห็น</div>
+                            ) : (
+                                <textarea
+                                    value={newComment}
+                                    onChange={e => setNewComment(e.target.value)}
+                                    placeholder="เพิ่มความเห็น..."
+                                    className="w-full bg-white border border-gray-200 focus:border-green-400 focus:ring-2 focus:ring-green-100 rounded-2xl p-2.5 text-xs outline-none resize-none shadow-sm pb-8 custom-scrollbar min-h-[60px]"
+                                    rows="1"
+                                    onKeyDown={e => {
+                                        if (e.key === 'Enter' && !e.shiftKey) { 
+                                            e.preventDefault(); 
+                                            handleSubmit(e);
+                                        }
+                                    }}
+                                />
+                            )}
+                            {currentUser && !currentUser.isAnonymous && (
+                                <button type="submit" disabled={!newComment.trim() || submitting} className="absolute bottom-2 right-2 p-1.5 bg-green-500 text-white rounded-full disabled:opacity-40 disabled:bg-gray-400 hover:bg-green-600 transition-colors shadow-sm">
+                                    <svg className="w-3.5 h-3.5 transform -rotate-45 ml-0.5 mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                                </button>
+                            )}
+                        </div>
+                    </form>
+                </div>
+            );
         };
 
         const LikeButton = ({ itemId, currentUser, setShowLoginModal }) => {
@@ -553,6 +762,7 @@
             const [selectedProduct, setSelectedProduct] = useState(null);
             const [showAllVariants, setShowAllVariants] = useState(false);
             const [zoomedImage, setZoomedImage] = useState(null);
+            const [expandedComments, setExpandedComments] = useState({});
 
             // ── NEW: active category filter for search page ──
             const [activeCategoryFilter, setActiveCategoryFilter] = useState(null); // null = all
@@ -602,6 +812,9 @@
             // Profile state
             const [showProfileModal, setShowProfileModal] = useState(false);
             const [profileForceOpen, setProfileForceOpen] = useState(false);
+
+            // Fetch liked items
+            const { likedItemIds, loadingLikes } = useUserLikes(currentUser);
 
             useEffect(() => {
                 if (toastMessage) {
@@ -1381,7 +1594,7 @@
                             <>
                                 <div className="flex bg-white border-b border-gray-100 sticky top-0 z-10 gap-1">
                                     <button onClick={() => setProfileTab('posts')} className={`flex-[0.45] py-4 text-sm font-bold transition-colors border-b-2 ${profileTab === 'posts' ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-400 hover:bg-gray-50'}`}>โพสต์บอกต่อ ({myPosts.length})</button>
-                                    <button onClick={() => setProfileTab('likes')} className={`flex-[0.45] py-4 text-sm font-bold transition-colors border-b-2 ${profileTab === 'likes' ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-400 hover:bg-gray-50'}`}>ที่ถูกใจ (0)</button>
+                                    <button onClick={() => setProfileTab('likes')} className={`flex-[0.45] py-4 text-sm font-bold transition-colors border-b-2 ${profileTab === 'likes' ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-400 hover:bg-gray-50'}`}>ที่ถูกใจ ({likedItemIds.length})</button>
                                     <button onClick={() => setProfileTab('news')} className={`flex-[0.1] py-4 text-sm font-bold transition-colors border-b-2 flex items-center justify-center relative group ${profileTab === 'news' ? 'border-red-500 text-red-500' : 'border-transparent text-red-400 hover:bg-red-50'}`}>
                                         <Bell size={18} className="group-hover:scale-110 transition-transform" />
                                         {unreadAdminNewsCount > 0 && <span className="absolute top-1 right-1 bg-red-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-tight">{unreadAdminNewsCount > 99 ? '99+' : unreadAdminNewsCount}</span>}
@@ -1420,11 +1633,36 @@
                                         )
                                     )}
                                     {profileTab === 'likes' && (
-                                        <div className="text-center py-16 flex flex-col items-center">
-                                            <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4"><Heart size={28} className="text-red-200" /></div>
-                                            <div className="text-gray-500 font-bold text-sm">ยังไม่มีรายการที่ถูกใจ</div>
-                                            <div className="text-gray-400 text-xs mt-1">ฟีเจอร์กดถูกใจจะเปิดให้บริการเร็วๆ นี้</div>
-                                        </div>
+                                        loadingLikes ? (
+                                            <div className="text-center py-10 text-gray-500 text-xs">กำลังโหลด...</div>
+                                        ) : likedItemIds.length > 0 ? (
+                                            deals.filter(d => likedItemIds.includes(d.id)).map((deal, idx) => (
+                                                <div key={deal.id + idx} className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex gap-3 relative overflow-hidden mb-3" onClick={() => { setSelectedProduct(deal); setShowAllVariants(false); setIsDescriptionExpanded(false); setCurrentView('product_detail'); }}>
+                                                    <div className="w-24 h-24 rounded-xl bg-gray-100 flex-shrink-0 overflow-hidden">
+                                                        {deal.image ? <img src={deal.image} alt={deal.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
+                                                    </div>
+                                                    <div className="flex-1 flex flex-col justify-between py-1">
+                                                        <div>
+                                                            <h4 className="font-bold text-gray-800 text-sm leading-tight line-clamp-2">{deal.name}</h4>
+                                                            <div className="text-xs text-gray-500 mt-1 flex items-center gap-1"><MapPin size={10} /> {deal.shop}</div>
+                                                        </div>
+                                                        <div className="flex justify-between items-end">
+                                                            <div className="text-lg font-bold text-red-500">฿{deal.price}</div>
+                                                            <div className="flex items-center gap-3 text-xs text-gray-400">
+                                                                <span className="flex items-center gap-1"><Heart size={14} className="text-red-500" fill="currentColor" /> {deal.likes}</span>
+                                                                <span className="flex items-center gap-1"><MessageSquare size={14} /> {deal.comments || 0}</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <div className="text-center py-16 flex flex-col items-center">
+                                                <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4"><Heart size={28} className="text-red-200" /></div>
+                                                <div className="text-gray-500 font-bold text-sm">ยังไม่มีรายการที่ถูกใจ</div>
+                                                <div className="text-gray-400 text-xs mt-1">เริ่มกดถูกใจดีลเด็ดๆ ที่คุณชอบ</div>
+                                            </div>
+                                        )
                                     )}
                                     {profileTab === 'news' && (
                                         <div className="space-y-3">
@@ -2466,6 +2704,9 @@
                                                             </div>
                                                             <div className="flex items-center gap-2 mt-1">
                                                                 <LikeButton itemId={deal.id} currentUser={currentUser} setShowLoginModal={setShowLoginModal} />
+                                                                <button onClick={(e) => { e.stopPropagation(); setExpandedComments(prev => ({ ...prev, [deal.id]: !prev[deal.id] })) }} className="flex items-center gap-1 text-[11px] font-bold text-gray-500 hover:text-blue-500 transition-colors bg-gray-50 hover:bg-blue-50 px-2 py-1 rounded-lg border border-gray-100 shadow-sm leading-none h-[22px]">
+                                                                    <MessageSquare size={10} /> {deal.comments || 0}
+                                                                </button>
                                                                 <button onClick={(e) => { e.stopPropagation(); setPostReportDeal(deal); setPostReportReason(null); setPostReportText(''); }} className="p-1 text-gray-300 hover:text-gray-500 rounded-full hover:bg-gray-100 transition-colors" title="แจ้งปัญหาโพสต์นี้">
                                                                     <MoreVertical size={14} />
                                                                 </button>
@@ -2473,6 +2714,14 @@
                                                         </div>
                                                     </div>
                                                 </div>
+                                                
+                                                <CommentSection 
+                                                    itemId={deal.id} 
+                                                    currentUser={currentUser} 
+                                                    setShowLoginModal={setShowLoginModal}
+                                                    expanded={!!expandedComments[deal.id]}
+                                                    setExpanded={(val) => setExpandedComments(prev => ({ ...prev, [deal.id]: val }))}
+                                                />
                                             </div>
                                         );
                                     })}
@@ -3084,6 +3333,23 @@
                                                 <span>{d.userDisplayName}</span>
                                                 <span>·</span>
                                                 <span>โพสต์เมื่อ {d.timePosted}</span>
+                                            </div>
+                                            
+                                            {/* Comments */}
+                                            <div className="mt-6">
+                                                <button onClick={() => setExpandedComments(prev => ({ ...prev, [d.id]: !prev[d.id] }))} className="w-full flex items-center justify-center gap-2 py-3 bg-gray-50 border border-gray-100 rounded-xl text-gray-600 font-bold hover:bg-gray-100 transition-colors shadow-sm">
+                                                    <MessageSquare size={16} />
+                                                    {expandedComments[d.id] ? 'ซ่อนความคิดเห็น' : `แสดงความคิดเห็น (${d.comments || 0})`}
+                                                </button>
+                                                <div className="mt-2">
+                                                    <CommentSection 
+                                                        itemId={d.id} 
+                                                        currentUser={currentUser} 
+                                                        setShowLoginModal={setShowLoginModal}
+                                                        expanded={!!expandedComments[d.id]}
+                                                        setExpanded={(val) => setExpandedComments(prev => ({ ...prev, [d.id]: val }))}
+                                                    />
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
