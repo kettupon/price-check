@@ -233,6 +233,311 @@
             );
         };
 
+        const ProfileEditModal = ({
+            profile, currentUser, saveProfile, setToastMessage,
+            showProfileModal, setShowProfileModal, profileForceOpen, setProfileForceOpen
+        }) => {
+            const [pNickname, setPNickname] = useState(profile?.nickname || currentUser?.displayName || '');
+            const [pFirstName, setPFirstName] = useState(profile?.firstName || '');
+            const [pLastName, setPLastName] = useState(profile?.lastName || '');
+            const [pMobile, setPMobile] = useState(profile?.mobile || '');
+            const [pProvince, setPProvince] = useState(profile?.province || '');
+            const [pPhotoURL, setPPhotoURL] = useState(profile?.photoURL || currentUser?.photoURL || null);
+            const [pErrors, setPErrors] = useState({});
+            const [pSaving, setPSaving] = useState(false);
+            const [showNicknameRequest, setShowNicknameRequest] = useState(false);
+            const [reqNickname, setReqNickname] = useState('');
+            const [reqReason, setReqReason] = useState('');
+            const [reqSubmitting, setReqSubmitting] = useState(false);
+
+            const nicknameLocked = !!profile?.nicknameChangedAt;
+            const pendingRequest = profile?.nicknameChangeRequest?.status === 'pending';
+            const rejectedRequest = profile?.nicknameChangeRequest?.status === 'rejected';
+
+            // Auto-approve nickname change if approved by admin
+            useEffect(() => {
+                if (profile?.nicknameChangeRequest?.status === 'approved') {
+                    const newNick = profile.nicknameChangeRequest.requestedNickname;
+                    saveProfile({ nickname: newNick, nicknameChangedAt: Date.now(), nicknameChangeRequest: null });
+                    // Update all user's posts
+                    getDocs(query(collection(db, 'items'), where('userId', '==', currentUser?.uid))).then(snap => {
+                        snap.docs.forEach(d => updateDoc(doc(db, 'items', d.id), { userDisplayName: newNick }));
+                    });
+                    setToastMessage('คำขอได้รับการอนุมัติแล้ว ชื่อของคุณถูกเปลี่ยนเรียบร้อย');
+                }
+            }, [profile?.nicknameChangeRequest?.status]);
+
+            const formatMobile = (val) => {
+                const digits = val.replace(/\D/g, '').slice(0, 10);
+                if (digits.length <= 3) return digits;
+                if (digits.length <= 6) return digits.slice(0,3) + '-' + digits.slice(3);
+                return digits.slice(0,3) + '-' + digits.slice(3,6) + '-' + digits.slice(6);
+            };
+
+            const validateMobile = (m) => {
+                const digits = m.replace(/\D/g, '');
+                return digits.length === 10 && digits.startsWith('0');
+            };
+
+            const handleAvatarUpload = (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        const maxSize = 400;
+                        let w = img.width, h = img.height;
+                        if (w > maxSize || h > maxSize) {
+                            if (w > h) { h = Math.round(h * maxSize / w); w = maxSize; }
+                            else { w = Math.round(w * maxSize / h); h = maxSize; }
+                        }
+                        canvas.width = w; canvas.height = h;
+                        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                        setPPhotoURL(canvas.toDataURL('image/jpeg', 0.8));
+                    };
+                    img.src = ev.target.result;
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const validate = () => {
+                const errs = {};
+                if (!nicknameLocked && !pNickname.trim()) errs.nickname = 'กรุณากรอกชื่อที่แสดงในแอป';
+                if (!pFirstName.trim()) errs.firstName = 'กรุณากรอกชื่อ';
+                if (!pLastName.trim()) errs.lastName = 'กรุณากรอกนามสกุล';
+                if (!pMobile.trim()) errs.mobile = 'กรุณากรอกเบอร์โทรศัพท์';
+                else if (!validateMobile(pMobile)) errs.mobile = 'รูปแบบไม่ถูกต้อง (0XX-XXX-XXXX)';
+                if (!pProvince) errs.province = 'กรุณาเลือกจังหวัด';
+                setPErrors(errs);
+                return Object.keys(errs).length === 0;
+            };
+
+            const handleSave = async () => {
+                if (!validate()) return;
+                setPSaving(true);
+                try {
+                    const isFirstNicknameSet = !profile?.nicknameChangedAt && !profile?.nickname;
+                    const data = {
+                        firstName: pFirstName.trim(), lastName: pLastName.trim(),
+                        mobile: pMobile.replace(/\D/g, ''), province: pProvince,
+                        photoURL: pPhotoURL,
+                    };
+                    if (!nicknameLocked) {
+                        data.nickname = pNickname.trim();
+                        if (!isFirstNicknameSet || (profile?.nickname && profile.nickname !== pNickname.trim())) {
+                            data.nicknameChangedAt = Date.now();
+                        } else if (isFirstNicknameSet) {
+                            data.nicknameChangedAt = Date.now();
+                        }
+                    }
+                    await saveProfile(data);
+                    // Update display name on all existing posts
+                    if (data.nickname) {
+                        const snap = await getDocs(query(collection(db, 'items'), where('userId', '==', currentUser?.uid)));
+                        snap.docs.forEach(d => updateDoc(doc(db, 'items', d.id), { userDisplayName: data.nickname, userPhotoURL: pPhotoURL }));
+                    }
+                    setToastMessage('บันทึกข้อมูลเรียบร้อยแล้ว');
+                    setShowProfileModal(false);
+                    setProfileForceOpen(false);
+                } catch (e) { alert('เกิดข้อผิดพลาด: ' + e.message); }
+                setPSaving(false);
+            };
+
+            const handleNicknameRequest = async () => {
+                if (!reqNickname.trim() || !reqReason.trim()) return;
+                setReqSubmitting(true);
+                try {
+                    await saveProfile({
+                        nicknameChangeRequest: {
+                            requestedNickname: reqNickname.trim(),
+                            reason: reqReason.trim(),
+                            requestedAt: Date.now(),
+                            status: 'pending',
+                            adminNote: ''
+                        }
+                    });
+                    setShowNicknameRequest(false);
+                    setToastMessage('ส่งคำขอเปลี่ยนชื่อเรียบร้อยแล้ว');
+                } catch (e) { alert('เกิดข้อผิดพลาด: ' + e.message); }
+                setReqSubmitting(false);
+            };
+
+            const isFormValid = (() => {
+                if (!nicknameLocked && !pNickname.trim()) return false;
+                if (!pFirstName.trim() || !pLastName.trim()) return false;
+                if (!validateMobile(pMobile)) return false;
+                if (!pProvince) return false;
+                return true;
+            })();
+
+            const avatarInputRef = useRef(null);
+
+            if (!showProfileModal) return null;
+
+            return (
+                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center animate-fade-in">
+                    <div className="bg-white w-full max-w-md h-full max-h-[100dvh] overflow-y-auto flex flex-col">
+                        {/* Header */}
+                        <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-shrink-0 bg-gradient-to-r from-green-500 to-green-600 text-white">
+                            <div className="flex items-center gap-2">
+                                <Shield size={20} />
+                                <h2 className="text-lg font-bold">แก้ไขข้อมูลส่วนตัว</h2>
+                            </div>
+                            {!profileForceOpen && <button onClick={() => setShowProfileModal(false)} className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center hover:bg-white/30"><X size={18} /></button>}
+                        </div>
+
+                        {profileForceOpen && (
+                            <div className="bg-orange-50 border-b border-orange-200 p-3 text-center">
+                                <p className="text-sm font-bold text-orange-600">กรุณากรอกข้อมูลส่วนตัวให้ครบก่อนใช้งาน</p>
+                            </div>
+                        )}
+
+                        <div className="flex-1 p-5 space-y-6">
+                            {/* Avatar Section */}
+                            <div className="flex flex-col items-center gap-3">
+                                <div className="relative">
+                                    {pPhotoURL ? (
+                                        <img src={pPhotoURL} className="w-24 h-24 rounded-full object-cover border-4 border-green-100 shadow-lg" />
+                                    ) : (
+                                        <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center border-4 border-green-100 shadow-lg"><User size={40} className="text-gray-300" /></div>
+                                    )}
+                                    <button onClick={() => avatarInputRef.current?.click()} className="absolute -bottom-1 -right-1 w-8 h-8 bg-green-500 text-white rounded-full flex items-center justify-center shadow-md hover:bg-green-600 transition-colors">
+                                        <Camera size={14} />
+                                    </button>
+                                </div>
+                                <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
+                                <button onClick={() => avatarInputRef.current?.click()} className="text-xs text-green-600 font-bold">เปลี่ยนรูป</button>
+                            </div>
+
+                            {/* Nickname */}
+                            <div className="space-y-1.5">
+                                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1">
+                                    ชื่อที่แสดงในแอป <span className="text-red-500">*</span>
+                                    {nicknameLocked && <Lock size={10} className="text-orange-500" />}
+                                </label>
+                                {nicknameLocked ? (
+                                    <div>
+                                        <div className="w-full p-3 bg-gray-100 rounded-xl text-sm font-bold text-gray-600 border-2 border-gray-200 flex items-center justify-between">
+                                            <span>{profile?.nickname}</span>
+                                            <Lock size={14} className="text-gray-400" />
+                                        </div>
+                                        <p className="text-[10px] text-orange-500 font-medium mt-1">คุณเปลี่ยนชื่อแสดงไปแล้วครั้งหนึ่ง</p>
+                                        {pendingRequest ? (
+                                            <div className="mt-2 bg-yellow-50 border border-yellow-200 rounded-xl p-3">
+                                                <p className="text-xs font-bold text-yellow-700">คำขอเปลี่ยนชื่อของคุณกำลังรอการอนุมัติ</p>
+                                                <p className="text-[10px] text-gray-500 italic mt-1">ชื่อใหม่ที่ขอ: {profile?.nicknameChangeRequest?.requestedNickname}</p>
+                                            </div>
+                                        ) : rejectedRequest ? (
+                                            <div className="mt-2 bg-red-50 border border-red-200 rounded-xl p-3">
+                                                <p className="text-xs font-bold text-red-600">คำขอถูกปฏิเสธ: {profile?.nicknameChangeRequest?.adminNote || 'ไม่ระบุเหตุผล'}</p>
+                                                <button onClick={() => { saveProfile({ nicknameChangeRequest: null }); }} className="mt-1 text-[10px] text-blue-600 font-bold underline">ส่งคำขอใหม่</button>
+                                            </div>
+                                        ) : (
+                                            <button onClick={() => setShowNicknameRequest(true)} className="mt-2 text-xs text-blue-600 font-bold bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200 hover:bg-blue-100 transition-colors">
+                                                ขอเปลี่ยนชื่อใหม่ (ต้องรออนุมัติจาก Admin)
+                                            </button>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div>
+                                        <input type="text" value={pNickname} onChange={e => setPNickname(e.target.value)} placeholder="ชื่อที่แสดงในแอป"
+                                            className="w-full p-3 bg-gray-50 rounded-xl text-sm font-bold text-gray-800 border-2 border-transparent focus:border-green-400 outline-none" />
+                                        {pErrors.nickname && <p className="text-xs text-red-500 mt-1">{pErrors.nickname}</p>}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Personal Details */}
+                            <div className="space-y-4">
+                                <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest border-b border-gray-100 pb-2">ข้อมูลส่วนตัว</h3>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="text-[10px] font-bold text-gray-400 mb-1 block">ชื่อ <span className="text-red-500">*</span></label>
+                                        <input type="text" value={pFirstName} onChange={e => setPFirstName(e.target.value)} placeholder="ชื่อ"
+                                            className="w-full p-3 bg-gray-50 rounded-xl text-sm font-bold text-gray-800 border-2 border-transparent focus:border-green-400 outline-none" />
+                                        {pErrors.firstName && <p className="text-xs text-red-500 mt-1">{pErrors.firstName}</p>}
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-bold text-gray-400 mb-1 block">นามสกุล <span className="text-red-500">*</span></label>
+                                        <input type="text" value={pLastName} onChange={e => setPLastName(e.target.value)} placeholder="นามสกุล"
+                                            className="w-full p-3 bg-gray-50 rounded-xl text-sm font-bold text-gray-800 border-2 border-transparent focus:border-green-400 outline-none" />
+                                        {pErrors.lastName && <p className="text-xs text-red-500 mt-1">{pErrors.lastName}</p>}
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-bold text-gray-400 mb-1 block">เบอร์โทรศัพท์ <span className="text-red-500">*</span></label>
+                                    <input type="tel" value={formatMobile(pMobile)} onChange={e => setPMobile(e.target.value.replace(/\D/g, ''))} placeholder="0XX-XXX-XXXX" inputMode="tel"
+                                        className="w-full p-3 bg-gray-50 rounded-xl text-sm font-bold text-gray-800 border-2 border-transparent focus:border-green-400 outline-none" />
+                                    {pErrors.mobile && <p className="text-xs text-red-500 mt-1">{pErrors.mobile}</p>}
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-bold text-gray-400 mb-1 block">จังหวัด <span className="text-red-500">*</span></label>
+                                    <select value={pProvince} onChange={e => setPProvince(e.target.value)}
+                                        className="w-full p-3 bg-gray-50 rounded-xl text-sm font-bold text-gray-800 border-2 border-transparent focus:border-green-400 outline-none">
+                                        <option value="">เลือกจังหวัด</option>
+                                        {THAI_PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
+                                    </select>
+                                    {pErrors.province && <p className="text-xs text-red-500 mt-1">{pErrors.province}</p>}
+                                </div>
+                            </div>
+
+                            {/* Account Info */}
+                            <div className="space-y-2">
+                                <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest border-b border-gray-100 pb-2">ข้อมูลบัญชี</h3>
+                                {currentUser?.email && (
+                                    <div className="flex items-center justify-between py-2">
+                                        <span className="text-xs text-gray-500">อีเมล</span>
+                                        <span className="text-xs font-bold text-gray-700">{currentUser.email}</span>
+                                    </div>
+                                )}
+                                {profile?.createdAt && (
+                                    <div className="flex items-center justify-between py-2">
+                                        <span className="text-xs text-gray-500">สมาชิกตั้งแต่</span>
+                                        <span className="text-xs font-bold text-gray-700">{new Date(profile.createdAt).toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Save Button */}
+                            <button onClick={handleSave} disabled={pSaving || !isFormValid}
+                                className="w-full py-4 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-2xl font-bold text-base shadow-lg shadow-green-200 active:scale-95 transition-transform disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                                <CheckCircle2 size={20} />
+                                {pSaving ? 'กำลังบันทึก...' : 'บันทึกข้อมูล'}
+                            </button>
+                        </div>
+
+                        {/* Nickname Change Request Modal */}
+                        {showNicknameRequest && (
+                            <div className="absolute inset-0 bg-black/50 z-[70] flex items-center justify-center p-6" onClick={() => setShowNicknameRequest(false)}>
+                                <div className="bg-white rounded-2xl w-full max-w-sm p-5 space-y-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+                                    <h3 className="font-bold text-gray-800">ขอเปลี่ยนชื่อแสดง</h3>
+                                    <div>
+                                        <p className="text-xs text-gray-500 mb-1">ชื่อปัจจุบัน: <span className="font-bold">{profile?.nickname}</span></p>
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-bold text-gray-400 mb-1 block">ชื่อใหม่ที่ต้องการ <span className="text-red-500">*</span></label>
+                                        <input type="text" value={reqNickname} onChange={e => setReqNickname(e.target.value)} placeholder="ชื่อใหม่"
+                                            className="w-full p-3 bg-gray-50 rounded-xl text-sm border-2 border-transparent focus:border-green-400 outline-none" />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-bold text-gray-400 mb-1 block">เหตุผลที่ต้องการเปลี่ยน <span className="text-red-500">*</span></label>
+                                        <textarea value={reqReason} onChange={e => setReqReason(e.target.value)} placeholder="เหตุผล..." rows={2}
+                                            className="w-full p-3 bg-gray-50 rounded-xl text-sm border-2 border-transparent focus:border-green-400 outline-none resize-none" />
+                                    </div>
+                                    <button onClick={handleNicknameRequest} disabled={reqSubmitting || !reqNickname.trim() || !reqReason.trim()}
+                                        className="w-full py-3 bg-green-500 text-white rounded-xl font-bold text-sm disabled:opacity-50 active:scale-95 transition-transform">
+                                        {reqSubmitting ? 'กำลังส่ง...' : 'ส่งคำขอ'}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
         function App() {
             const [currentView, setCurrentView] = useState('feed');
             const [showShippingInFeed, setShowShippingInFeed] = useState(false);
@@ -2608,305 +2913,16 @@
                         })()}
 
                         {/* PROFILE EDIT MODAL */}
-                        {showProfileModal && (() => {
-                            const [pNickname, setPNickname] = useState(profile?.nickname || currentUser?.displayName || '');
-                            const [pFirstName, setPFirstName] = useState(profile?.firstName || '');
-                            const [pLastName, setPLastName] = useState(profile?.lastName || '');
-                            const [pMobile, setPMobile] = useState(profile?.mobile || '');
-                            const [pProvince, setPProvince] = useState(profile?.province || '');
-                            const [pPhotoURL, setPPhotoURL] = useState(profile?.photoURL || currentUser?.photoURL || null);
-                            const [pErrors, setPErrors] = useState({});
-                            const [pSaving, setPSaving] = useState(false);
-                            const [showNicknameRequest, setShowNicknameRequest] = useState(false);
-                            const [reqNickname, setReqNickname] = useState('');
-                            const [reqReason, setReqReason] = useState('');
-                            const [reqSubmitting, setReqSubmitting] = useState(false);
-
-                            const nicknameLocked = !!profile?.nicknameChangedAt;
-                            const pendingRequest = profile?.nicknameChangeRequest?.status === 'pending';
-                            const rejectedRequest = profile?.nicknameChangeRequest?.status === 'rejected';
-
-                            // Auto-approve nickname change if approved by admin
-                            useEffect(() => {
-                                if (profile?.nicknameChangeRequest?.status === 'approved') {
-                                    const newNick = profile.nicknameChangeRequest.requestedNickname;
-                                    saveProfile({ nickname: newNick, nicknameChangedAt: Date.now(), nicknameChangeRequest: null });
-                                    // Update all user's posts
-                                    getDocs(query(collection(db, 'items'), where('userId', '==', currentUser.uid))).then(snap => {
-                                        snap.docs.forEach(d => updateDoc(doc(db, 'items', d.id), { userDisplayName: newNick }));
-                                    });
-                                    setToastMessage('คำขอได้รับการอนุมัติแล้ว ชื่อของคุณถูกเปลี่ยนเรียบร้อย');
-                                }
-                            }, [profile?.nicknameChangeRequest?.status]);
-
-                            const formatMobile = (val) => {
-                                const digits = val.replace(/\D/g, '').slice(0, 10);
-                                if (digits.length <= 3) return digits;
-                                if (digits.length <= 6) return digits.slice(0,3) + '-' + digits.slice(3);
-                                return digits.slice(0,3) + '-' + digits.slice(3,6) + '-' + digits.slice(6);
-                            };
-
-                            const validateMobile = (m) => {
-                                const digits = m.replace(/\D/g, '');
-                                return digits.length === 10 && digits.startsWith('0');
-                            };
-
-                            const handleAvatarUpload = (e) => {
-                                const file = e.target.files?.[0];
-                                if (!file) return;
-                                const reader = new FileReader();
-                                reader.onload = (ev) => {
-                                    const img = new Image();
-                                    img.onload = () => {
-                                        const canvas = document.createElement('canvas');
-                                        const maxSize = 400;
-                                        let w = img.width, h = img.height;
-                                        if (w > maxSize || h > maxSize) {
-                                            if (w > h) { h = Math.round(h * maxSize / w); w = maxSize; }
-                                            else { w = Math.round(w * maxSize / h); h = maxSize; }
-                                        }
-                                        canvas.width = w; canvas.height = h;
-                                        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-                                        setPPhotoURL(canvas.toDataURL('image/jpeg', 0.8));
-                                    };
-                                    img.src = ev.target.result;
-                                };
-                                reader.readAsDataURL(file);
-                            };
-
-                            const validate = () => {
-                                const errs = {};
-                                if (!nicknameLocked && !pNickname.trim()) errs.nickname = 'กรุณากรอกชื่อที่แสดงในแอป';
-                                if (!pFirstName.trim()) errs.firstName = 'กรุณากรอกชื่อ';
-                                if (!pLastName.trim()) errs.lastName = 'กรุณากรอกนามสกุล';
-                                if (!pMobile.trim()) errs.mobile = 'กรุณากรอกเบอร์โทรศัพท์';
-                                else if (!validateMobile(pMobile)) errs.mobile = 'รูปแบบไม่ถูกต้อง (0XX-XXX-XXXX)';
-                                if (!pProvince) errs.province = 'กรุณาเลือกจังหวัด';
-                                setPErrors(errs);
-                                return Object.keys(errs).length === 0;
-                            };
-
-                            const handleSave = async () => {
-                                if (!validate()) return;
-                                setPSaving(true);
-                                try {
-                                    const isFirstNicknameSet = !profile?.nicknameChangedAt && !profile?.nickname;
-                                    const data = {
-                                        firstName: pFirstName.trim(), lastName: pLastName.trim(),
-                                        mobile: pMobile.replace(/\D/g, ''), province: pProvince,
-                                        photoURL: pPhotoURL,
-                                    };
-                                    if (!nicknameLocked) {
-                                        data.nickname = pNickname.trim();
-                                        if (!isFirstNicknameSet || (profile?.nickname && profile.nickname !== pNickname.trim())) {
-                                            data.nicknameChangedAt = Date.now();
-                                        } else if (isFirstNicknameSet) {
-                                            data.nicknameChangedAt = Date.now();
-                                        }
-                                    }
-                                    await saveProfile(data);
-                                    // Update display name on all existing posts
-                                    if (data.nickname) {
-                                        const snap = await getDocs(query(collection(db, 'items'), where('userId', '==', currentUser.uid)));
-                                        snap.docs.forEach(d => updateDoc(doc(db, 'items', d.id), { userDisplayName: data.nickname, userPhotoURL: pPhotoURL }));
-                                    }
-                                    setToastMessage('บันทึกข้อมูลเรียบร้อยแล้ว');
-                                    setShowProfileModal(false);
-                                    setProfileForceOpen(false);
-                                } catch (e) { alert('เกิดข้อผิดพลาด: ' + e.message); }
-                                setPSaving(false);
-                            };
-
-                            const handleNicknameRequest = async () => {
-                                if (!reqNickname.trim() || !reqReason.trim()) return;
-                                setReqSubmitting(true);
-                                try {
-                                    await saveProfile({
-                                        nicknameChangeRequest: {
-                                            requestedNickname: reqNickname.trim(),
-                                            reason: reqReason.trim(),
-                                            requestedAt: Date.now(),
-                                            status: 'pending',
-                                            adminNote: ''
-                                        }
-                                    });
-                                    setShowNicknameRequest(false);
-                                    setToastMessage('ส่งคำขอเปลี่ยนชื่อเรียบร้อยแล้ว');
-                                } catch (e) { alert('เกิดข้อผิดพลาด: ' + e.message); }
-                                setReqSubmitting(false);
-                            };
-
-                            const isFormValid = (() => {
-                                if (!nicknameLocked && !pNickname.trim()) return false;
-                                if (!pFirstName.trim() || !pLastName.trim()) return false;
-                                if (!validateMobile(pMobile)) return false;
-                                if (!pProvince) return false;
-                                return true;
-                            })();
-
-                            const avatarInputRef = useRef(null);
-
-                            return (
-                                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center animate-fade-in">
-                                    <div className="bg-white w-full max-w-md h-full max-h-[100dvh] overflow-y-auto flex flex-col">
-                                        {/* Header */}
-                                        <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-shrink-0 bg-gradient-to-r from-green-500 to-green-600 text-white">
-                                            <div className="flex items-center gap-2">
-                                                <Shield size={20} />
-                                                <h2 className="text-lg font-bold">แก้ไขข้อมูลส่วนตัว</h2>
-                                            </div>
-                                            {!profileForceOpen && <button onClick={() => setShowProfileModal(false)} className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center hover:bg-white/30"><X size={18} /></button>}
-                                        </div>
-
-                                        {profileForceOpen && (
-                                            <div className="bg-orange-50 border-b border-orange-200 p-3 text-center">
-                                                <p className="text-sm font-bold text-orange-600">กรุณากรอกข้อมูลส่วนตัวให้ครบก่อนใช้งาน</p>
-                                            </div>
-                                        )}
-
-                                        <div className="flex-1 p-5 space-y-6">
-                                            {/* Avatar Section */}
-                                            <div className="flex flex-col items-center gap-3">
-                                                <div className="relative">
-                                                    {pPhotoURL ? (
-                                                        <img src={pPhotoURL} className="w-24 h-24 rounded-full object-cover border-4 border-green-100 shadow-lg" />
-                                                    ) : (
-                                                        <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center border-4 border-green-100 shadow-lg"><User size={40} className="text-gray-300" /></div>
-                                                    )}
-                                                    <button onClick={() => avatarInputRef.current?.click()} className="absolute -bottom-1 -right-1 w-8 h-8 bg-green-500 text-white rounded-full flex items-center justify-center shadow-md hover:bg-green-600 transition-colors">
-                                                        <Camera size={14} />
-                                                    </button>
-                                                </div>
-                                                <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
-                                                <button onClick={() => avatarInputRef.current?.click()} className="text-xs text-green-600 font-bold">เปลี่ยนรูป</button>
-                                            </div>
-
-                                            {/* Nickname */}
-                                            <div className="space-y-1.5">
-                                                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1">
-                                                    ชื่อที่แสดงในแอป <span className="text-red-500">*</span>
-                                                    {nicknameLocked && <Lock size={10} className="text-orange-500" />}
-                                                </label>
-                                                {nicknameLocked ? (
-                                                    <div>
-                                                        <div className="w-full p-3 bg-gray-100 rounded-xl text-sm font-bold text-gray-600 border-2 border-gray-200 flex items-center justify-between">
-                                                            <span>{profile?.nickname}</span>
-                                                            <Lock size={14} className="text-gray-400" />
-                                                        </div>
-                                                        <p className="text-[10px] text-orange-500 font-medium mt-1">คุณเปลี่ยนชื่อแสดงไปแล้วครั้งหนึ่ง</p>
-                                                        {pendingRequest ? (
-                                                            <div className="mt-2 bg-yellow-50 border border-yellow-200 rounded-xl p-3">
-                                                                <p className="text-xs font-bold text-yellow-700">คำขอเปลี่ยนชื่อของคุณกำลังรอการอนุมัติ</p>
-                                                                <p className="text-[10px] text-gray-500 italic mt-1">ชื่อใหม่ที่ขอ: {profile?.nicknameChangeRequest?.requestedNickname}</p>
-                                                            </div>
-                                                        ) : rejectedRequest ? (
-                                                            <div className="mt-2 bg-red-50 border border-red-200 rounded-xl p-3">
-                                                                <p className="text-xs font-bold text-red-600">คำขอถูกปฏิเสธ: {profile?.nicknameChangeRequest?.adminNote || 'ไม่ระบุเหตุผล'}</p>
-                                                                <button onClick={() => { saveProfile({ nicknameChangeRequest: null }); }} className="mt-1 text-[10px] text-blue-600 font-bold underline">ส่งคำขอใหม่</button>
-                                                            </div>
-                                                        ) : (
-                                                            <button onClick={() => setShowNicknameRequest(true)} className="mt-2 text-xs text-blue-600 font-bold bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200 hover:bg-blue-100 transition-colors">
-                                                                ขอเปลี่ยนชื่อใหม่ (ต้องรออนุมัติจาก Admin)
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                ) : (
-                                                    <div>
-                                                        <input type="text" value={pNickname} onChange={e => setPNickname(e.target.value)} placeholder="ชื่อที่แสดงในแอป"
-                                                            className="w-full p-3 bg-gray-50 rounded-xl text-sm font-bold text-gray-800 border-2 border-transparent focus:border-green-400 outline-none" />
-                                                        {pErrors.nickname && <p className="text-xs text-red-500 mt-1">{pErrors.nickname}</p>}
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {/* Personal Details */}
-                                            <div className="space-y-4">
-                                                <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest border-b border-gray-100 pb-2">ข้อมูลส่วนตัว</h3>
-                                                <div className="grid grid-cols-2 gap-3">
-                                                    <div>
-                                                        <label className="text-[10px] font-bold text-gray-400 mb-1 block">ชื่อ <span className="text-red-500">*</span></label>
-                                                        <input type="text" value={pFirstName} onChange={e => setPFirstName(e.target.value)} placeholder="ชื่อ"
-                                                            className="w-full p-3 bg-gray-50 rounded-xl text-sm font-bold text-gray-800 border-2 border-transparent focus:border-green-400 outline-none" />
-                                                        {pErrors.firstName && <p className="text-xs text-red-500 mt-1">{pErrors.firstName}</p>}
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-[10px] font-bold text-gray-400 mb-1 block">นามสกุล <span className="text-red-500">*</span></label>
-                                                        <input type="text" value={pLastName} onChange={e => setPLastName(e.target.value)} placeholder="นามสกุล"
-                                                            className="w-full p-3 bg-gray-50 rounded-xl text-sm font-bold text-gray-800 border-2 border-transparent focus:border-green-400 outline-none" />
-                                                        {pErrors.lastName && <p className="text-xs text-red-500 mt-1">{pErrors.lastName}</p>}
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-gray-400 mb-1 block">เบอร์โทรศัพท์ <span className="text-red-500">*</span></label>
-                                                    <input type="tel" value={formatMobile(pMobile)} onChange={e => setPMobile(e.target.value.replace(/\D/g, ''))} placeholder="0XX-XXX-XXXX" inputMode="tel"
-                                                        className="w-full p-3 bg-gray-50 rounded-xl text-sm font-bold text-gray-800 border-2 border-transparent focus:border-green-400 outline-none" />
-                                                    {pErrors.mobile && <p className="text-xs text-red-500 mt-1">{pErrors.mobile}</p>}
-                                                </div>
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-gray-400 mb-1 block">จังหวัด <span className="text-red-500">*</span></label>
-                                                    <select value={pProvince} onChange={e => setPProvince(e.target.value)}
-                                                        className="w-full p-3 bg-gray-50 rounded-xl text-sm font-bold text-gray-800 border-2 border-transparent focus:border-green-400 outline-none">
-                                                        <option value="">เลือกจังหวัด</option>
-                                                        {THAI_PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
-                                                    </select>
-                                                    {pErrors.province && <p className="text-xs text-red-500 mt-1">{pErrors.province}</p>}
-                                                </div>
-                                            </div>
-
-                                            {/* Account Info */}
-                                            <div className="space-y-2">
-                                                <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest border-b border-gray-100 pb-2">ข้อมูลบัญชี</h3>
-                                                {currentUser?.email && (
-                                                    <div className="flex items-center justify-between py-2">
-                                                        <span className="text-xs text-gray-500">อีเมล</span>
-                                                        <span className="text-xs font-bold text-gray-700">{currentUser.email}</span>
-                                                    </div>
-                                                )}
-                                                {profile?.createdAt && (
-                                                    <div className="flex items-center justify-between py-2">
-                                                        <span className="text-xs text-gray-500">สมาชิกตั้งแต่</span>
-                                                        <span className="text-xs font-bold text-gray-700">{new Date(profile.createdAt).toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {/* Save Button */}
-                                            <button onClick={handleSave} disabled={pSaving || !isFormValid}
-                                                className="w-full py-4 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-2xl font-bold text-base shadow-lg shadow-green-200 active:scale-95 transition-transform disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                                                <CheckCircle2 size={20} />
-                                                {pSaving ? 'กำลังบันทึก...' : 'บันทึกข้อมูล'}
-                                            </button>
-                                        </div>
-
-                                        {/* Nickname Change Request Modal */}
-                                        {showNicknameRequest && (
-                                            <div className="absolute inset-0 bg-black/50 z-[70] flex items-center justify-center p-6" onClick={() => setShowNicknameRequest(false)}>
-                                                <div className="bg-white rounded-2xl w-full max-w-sm p-5 space-y-4 shadow-2xl" onClick={e => e.stopPropagation()}>
-                                                    <h3 className="font-bold text-gray-800">ขอเปลี่ยนชื่อแสดง</h3>
-                                                    <div>
-                                                        <p className="text-xs text-gray-500 mb-1">ชื่อปัจจุบัน: <span className="font-bold">{profile?.nickname}</span></p>
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-[10px] font-bold text-gray-400 mb-1 block">ชื่อใหม่ที่ต้องการ <span className="text-red-500">*</span></label>
-                                                        <input type="text" value={reqNickname} onChange={e => setReqNickname(e.target.value)} placeholder="ชื่อใหม่"
-                                                            className="w-full p-3 bg-gray-50 rounded-xl text-sm border-2 border-transparent focus:border-green-400 outline-none" />
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-[10px] font-bold text-gray-400 mb-1 block">เหตุผลที่ต้องการเปลี่ยน <span className="text-red-500">*</span></label>
-                                                        <textarea value={reqReason} onChange={e => setReqReason(e.target.value)} placeholder="เหตุผล..." rows={2}
-                                                            className="w-full p-3 bg-gray-50 rounded-xl text-sm border-2 border-transparent focus:border-green-400 outline-none resize-none" />
-                                                    </div>
-                                                    <button onClick={handleNicknameRequest} disabled={reqSubmitting || !reqNickname.trim() || !reqReason.trim()}
-                                                        className="w-full py-3 bg-green-500 text-white rounded-xl font-bold text-sm disabled:opacity-50 active:scale-95 transition-transform">
-                                                        {reqSubmitting ? 'กำลังส่ง...' : 'ส่งคำขอ'}
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            );
-                        })()}
+                        <ProfileEditModal
+                            profile={profile}
+                            currentUser={currentUser}
+                            saveProfile={saveProfile}
+                            setToastMessage={setToastMessage}
+                            showProfileModal={showProfileModal}
+                            setShowProfileModal={setShowProfileModal}
+                            profileForceOpen={profileForceOpen}
+                            setProfileForceOpen={setProfileForceOpen}
+                        />
 
                         {/* TOAST NOTIFICATION */}
                         {toastMessage && (
