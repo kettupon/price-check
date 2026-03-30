@@ -80,6 +80,7 @@
       {
         "imports": {
           "react": "https://esm.sh/react@18.2.0",
+          "react-dom": "https://esm.sh/react-dom@18.2.0",
           "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
           "lucide-react": "https://esm.sh/lucide-react@0.294.0",
           "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
@@ -96,12 +97,13 @@
 
     <script type="text/babel" data-type="module">
         import React, { useState, useEffect, useRef, useMemo } from 'react';
+        import { createPortal } from 'react-dom';
         import { createRoot } from 'react-dom/client';
         import {
             MapPin, Users, Tag, AlertCircle, Plus, Trophy, Heart, MessageSquare,
             Share2, Search, Zap, Home, ListPlus, Calculator, ChevronLeft, ChevronRight, Image as ImageIcon,
             Coffee, ShoppingCart, Store, Package, User, X, ShoppingBag, ImageOff, Camera, FileText,
-            Grid, Folder, Bell, Clock, Link2, MoreVertical, Flag, CheckCircle2, XCircle, Edit3, Lock, Shield
+            Grid, Folder, Bell, Clock, Link2, MoreVertical, Flag, CheckCircle2, XCircle, Edit3, Lock, Shield, Trash2
         } from 'lucide-react';
         import { initializeApp } from 'firebase/app';
         import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDocs, updateDoc, where, doc, setDoc, increment, deleteDoc, getDoc, collectionGroup } from 'firebase/firestore';
@@ -202,13 +204,20 @@
                 setIsLiked(!prevLiked);
                 setCount(prevCount + (prevLiked ? -1 : 1));
                 try {
-                    const ref = doc(db, "items", itemId, "likes", currentUser.uid);
-                    if (prevLiked) await deleteDoc(ref);
-                    else await setDoc(ref, { 
-                        likedAt: new Date().toISOString(),
-                        userId: currentUser.uid,
-                        itemId: itemId
-                    });
+                    const itemLikeRef = doc(db, "items", itemId, "likes", currentUser.uid);
+                    const userLikeRef = doc(db, "users", currentUser.uid, "likedItems", itemId);
+                    if (prevLiked) {
+                        await deleteDoc(itemLikeRef);
+                        await deleteDoc(userLikeRef);
+                    } else {
+                        const likeData = { 
+                            likedAt: new Date().toISOString(),
+                            userId: currentUser.uid,
+                            itemId: itemId
+                        };
+                        await setDoc(itemLikeRef, likeData);
+                        await setDoc(userLikeRef, likeData);
+                    }
                 } catch (e) {
                     console.error("Error toggling like:", e);
                     setIsLiked(prevLiked);
@@ -229,8 +238,7 @@
                     return;
                 }
                 const q = query(
-                    collectionGroup(db, 'likes'),
-                    where('userId', '==', currentUser.uid),
+                    collection(db, "users", currentUser.uid, "likedItems"),
                     orderBy('likedAt', 'desc')
                 );
                 const unsub = onSnapshot(q, (snapshot) => {
@@ -313,17 +321,34 @@
             return { comments, loadingComments, addComment, deleteComment };
         };
 
-        const CommentSection = ({ itemId, currentUser, setShowLoginModal, expanded, setExpanded }) => {
+        const CommentSection = ({ itemId, currentUser, setShowLoginModal, expanded, setExpanded, onCountUpdate }) => {
             const { comments, loadingComments, addComment, deleteComment } = useComments(expanded ? itemId : null);
             const [newComment, setNewComment] = useState('');
             const [submitting, setSubmitting] = useState(false);
-            const listRef = useRef(null);
+            const [showFullModal, setShowFullModal] = useState(false);
+            const [optionsCommentId, setOptionsCommentId] = useState(null);
+            const modalListRef = useRef(null);
 
             useEffect(() => {
-                if (expanded && listRef.current) {
-                    listRef.current.scrollTop = listRef.current.scrollHeight;
+                if (showFullModal && modalListRef.current) {
+                    setTimeout(() => {
+                        if (modalListRef.current) modalListRef.current.scrollTop = modalListRef.current.scrollHeight;
+                    }, 50);
                 }
-            }, [comments, expanded]);
+            }, [comments, showFullModal]);
+
+            // Report live comment count to parent
+            useEffect(() => {
+                if (onCountUpdate && expanded) onCountUpdate(comments.length);
+            }, [comments.length, expanded]);
+
+            // Close dropdown when clicking outside
+            useEffect(() => {
+                if (!optionsCommentId) return;
+                const handler = () => setOptionsCommentId(null);
+                document.addEventListener('click', handler);
+                return () => document.removeEventListener('click', handler);
+            }, [optionsCommentId]);
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
@@ -342,6 +367,31 @@
                 setSubmitting(false);
             };
 
+            const handleReportComment = async (c) => {
+                if (!currentUser || currentUser.isAnonymous) {
+                    setShowLoginModal(true);
+                    return;
+                }
+                const reason = prompt('ระบุเหตุผลที่รายงานความคิดเห็นนี้:');
+                if (!reason) return;
+                try {
+                    await addDoc(collection(db, "reports"), {
+                        type: 'comment_report',
+                        commentId: c.id,
+                        commentText: c.text,
+                        commentUserId: c.userId,
+                        itemId: itemId,
+                        reporterId: currentUser.uid,
+                        reason: reason,
+                        status: 'pending',
+                        createdAt: Date.now()
+                    });
+                    alert('ส่งรายงานเรียบร้อยแล้ว ขอบคุณครับ');
+                } catch (e) {
+                    alert('เกิดข้อผิดพลาด: ' + e.message);
+                }
+            };
+
             const handleDelete = async (commentId, userId) => {
                 if (!confirm("ต้องการลบความคิดเห็นนี้หรือไม่?")) return;
                 try {
@@ -353,32 +403,118 @@
 
             if (!expanded) return null;
 
+            const visibleComments = comments.slice(-3);
+
+            // Render the dropdown menu for a comment
+            const renderOptionsMenu = (c) => (
+                <div style={{position:'fixed', top:0, left:0, right:0, bottom:0, zIndex:9998}} onClick={(e) => { e.stopPropagation(); setOptionsCommentId(null); }}>
+                    <div style={{position:'absolute', zIndex:9999}} className="w-40 bg-white rounded-xl shadow-[0_4px_20px_rgba(0,0,0,0.18)] border border-gray-100 overflow-hidden py-1 animate-fade-in" ref={(el) => {
+                        if (!el) return;
+                        const btn = document.querySelector(`[data-comment-opt="${c.id}"]`);
+                        if (btn) {
+                            const r = btn.getBoundingClientRect();
+                            el.style.top = (r.bottom + 4) + 'px';
+                            el.style.right = (window.innerWidth - r.right) + 'px';
+                            el.style.left = 'auto';
+                        }
+                    }} onClick={e => e.stopPropagation()}>
+                        <button onClick={() => { setOptionsCommentId(null); handleReportComment(c); }} className="w-full text-left px-4 py-3 text-xs font-bold text-orange-600 hover:bg-orange-50 flex items-center gap-2">
+                            <Flag size={14} /> รายงาน
+                        </button>
+                        {currentUser && currentUser.uid === c.userId && (
+                            <button onClick={() => { setOptionsCommentId(null); handleDelete(c.id, c.userId); }} className="w-full text-left px-4 py-3 text-xs font-bold text-red-500 hover:bg-red-50 flex items-center gap-2 border-t border-gray-100">
+                                <Trash2 size={14} /> ลบความเห็น
+                            </button>
+                        )}
+                    </div>
+                </div>
+            );
+
+            // Full comment modal rendered via portal
+            const fullModal = showFullModal ? createPortal(
+                <div className="fixed inset-0 bg-black/60 z-[9990] flex items-end sm:items-center justify-center animate-fade-in" onClick={() => { setShowFullModal(false); setOptionsCommentId(null); }}>
+                    <div className="bg-white w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl flex flex-col animate-slide-up" style={{maxHeight:'85dvh', height:'85dvh'}} onClick={e => e.stopPropagation()}>
+                        <div className="p-4 border-b border-gray-100 flex items-center justify-between shadow-sm shrink-0">
+                            <h3 className="font-bold text-gray-800 flex items-center gap-2"><MessageSquare size={18} className="text-blue-500" /> ความคิดเห็น ({comments.length})</h3>
+                            <button onClick={() => { setShowFullModal(false); setOptionsCommentId(null); }} className="w-8 h-8 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-500 rounded-full transition-colors"><X size={16} /></button>
+                        </div>
+                        
+                        <div ref={modalListRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50/50">
+                            {comments.map(c => (
+                                <div key={c.id} className="flex items-start justify-between text-xs relative">
+                                    <div className="flex gap-2 min-w-0 flex-1">
+                                        <div className="font-bold text-gray-800 whitespace-nowrap">{c.userDisplayName}:</div>
+                                        <div className="text-gray-700 break-words min-w-0">{c.text}</div>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 shrink-0 ml-3">
+                                        <span className="text-[10px] text-gray-400 whitespace-nowrap">{new Date(c.createdAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</span>
+                                        <button data-comment-opt={c.id} onClick={(e) => { e.stopPropagation(); setOptionsCommentId(optionsCommentId === c.id ? null : c.id); }} className="text-gray-400 hover:text-gray-600 transition-colors p-1 rounded hover:bg-gray-100">
+                                            <MoreVertical size={14} />
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                            {comments.length === 0 && <div className="text-center py-8 text-xs text-gray-400 italic">ยังไม่มีความคิดเห็น มาร่วมเป็นคนแรกเลย!</div>}
+                        </div>
+
+                        <div className="p-3 border-t border-gray-100 bg-white shrink-0" style={{paddingBottom:'max(12px, env(safe-area-inset-bottom))'}}>
+                            <form onSubmit={handleSubmit} className="flex gap-2 items-center">
+                                <div className="flex-1">
+                                    {(!currentUser || currentUser.isAnonymous) ? (
+                                        <div onClick={() => setShowLoginModal(true)} className="w-full bg-gray-50 border border-gray-200 rounded-full py-2.5 px-4 text-xs text-gray-500 cursor-pointer shadow-sm text-center font-bold">เข้าสู่ระบบเพื่อแสดงความเห็น</div>
+                                    ) : (
+                                        <div className="flex items-center bg-gray-50 border border-gray-200 rounded-full shadow-inner overflow-hidden pr-1.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 transition-all">
+                                            <input
+                                                type="text"
+                                                value={newComment}
+                                                onChange={e => setNewComment(e.target.value)}
+                                                placeholder="เพิ่มความคิดเห็น..."
+                                                className="flex-1 py-2.5 px-4 outline-none min-w-0 bg-transparent text-xs"
+                                            />
+                                            <button type="submit" disabled={!newComment.trim() || submitting} className="p-1.5 px-3 text-blue-500 disabled:opacity-40 disabled:text-gray-400 font-bold transition-colors">
+                                                ส่ง
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>,
+                document.body
+            ) : null;
+
+            // Options dropdown rendered via portal
+            const optionsPortal = optionsCommentId ? createPortal(
+                renderOptionsMenu(comments.find(c => c.id === optionsCommentId)),
+                document.body
+            ) : null;
+
             return (
-                <div className="bg-gray-50 border-t border-gray-100 p-3 pt-4 flex flex-col mt-2">
+                <div className="bg-gray-50/50 border-t border-gray-100 p-3 pt-3 flex flex-col mt-2 rounded-b-xl" onClick={(e) => e.stopPropagation()}>
                     {loadingComments ? (
-                        <div className="text-center py-4 text-xs text-gray-400">กำลังโหลด...</div>
+                        <div className="text-center py-2 text-[10px] text-gray-400">กำลังโหลด...</div>
                     ) : (
-                        <div ref={listRef} className="max-h-[300px] overflow-y-auto space-y-3 mb-3 pr-2 custom-scrollbar">
+                        <div className="space-y-1.5 mb-2">
+                            {comments.length > 3 && (
+                                <button onClick={() => setShowFullModal(true)} className="text-[10px] font-bold text-gray-500 hover:text-gray-700 transition-colors py-1 w-full text-left">
+                                    อ่านความคิดเห็นเพิ่มเติม ({comments.length} ความเห็น) ...
+                                </button>
+                            )}
                             {comments.length === 0 ? (
-                                <div className="text-center py-4 text-xs text-gray-400 italic">ยังไม่มีความคิดเห็น มาร่วมเป็นคนแรกเลย!</div>
+                                <div className="text-[10px] text-gray-400 italic py-1">ยังไม่มีความคิดเห็น มาร่วมเป็นคนแรกเลย!</div>
                             ) : (
-                                comments.map(c => (
-                                    <div key={c.id} className="flex gap-2 group animate-fade-in">
-                                        {c.userPhotoURL ? (
-                                            <img src={c.userPhotoURL} alt={c.userDisplayName} className="w-6 h-6 rounded-full object-cover shadow-sm bg-white shrink-0 mt-0.5" />
-                                        ) : (
-                                            <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center shrink-0 mt-0.5"><User size={12} className="text-gray-400" /></div>
-                                        )}
-                                        <div className="flex-1 min-w-0 bg-white p-2.5 rounded-2xl rounded-tl-none shadow-sm border border-gray-100 relative">
-                                            <div className="flex justify-between items-start gap-2 mb-1">
-                                                <span className="font-bold text-[11px] text-gray-700 truncate">{c.userDisplayName}</span>
-                                                <span className="text-[9px] text-gray-400 shrink-0">{new Date(c.createdAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</span>
-                                            </div>
-                                            <p className="text-xs text-gray-800 whitespace-pre-wrap leading-relaxed break-words">{c.text}</p>
-                                            
+                                visibleComments.map(c => (
+                                    <div key={c.id} className="flex items-baseline justify-between text-[11px] group">
+                                        <div className="flex items-baseline gap-1.5 min-w-0 pr-4">
+                                            <span className="font-bold text-gray-800 whitespace-nowrap">{c.userDisplayName}:</span>
+                                            <span className="text-gray-700 truncate">{c.text}</span>
+                                        </div>
+                                        <div className="flex items-baseline gap-2 shrink-0">
+                                            <span className="text-[9px] text-gray-400 whitespace-nowrap">{new Date(c.createdAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</span>
                                             {currentUser && currentUser.uid === c.userId && (
-                                                <button onClick={() => handleDelete(c.id, c.userId)} className="absolute -right-2 -top-2 w-6 h-6 bg-white border border-gray-200 rounded-full flex items-center justify-center text-red-400 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50 hover:text-red-600 shadow-sm">
-                                                    <X size={12} />
+                                                <button onClick={() => handleDelete(c.id, c.userId)} className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <X size={10} />
                                                 </button>
                                             )}
                                         </div>
@@ -388,37 +524,31 @@
                         </div>
                     )}
 
-                    <form onSubmit={handleSubmit} className="flex gap-2 items-end pt-2 border-t border-gray-200">
-                        {currentUser && !currentUser.isAnonymous && currentUser.photoURL ? (
-                            <img src={currentUser.photoURL} className="w-8 h-8 rounded-full border border-gray-200 shrink-0" />
-                        ) : (
-                            <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center shrink-0"><User size={16} className="text-gray-400" /></div>
-                        )}
+                    {/* Inline comment form */}
+                    <form onSubmit={handleSubmit} className="flex gap-2 items-center mt-1">
                         <div className="flex-1 relative">
                             {(!currentUser || currentUser.isAnonymous) ? (
-                                <div onClick={() => setShowLoginModal(true)} className="w-full bg-white border border-gray-200 rounded-2xl p-2.5 text-xs text-gray-400 cursor-pointer shadow-sm text-center font-bold pb-3">เข้าสู่ระบบเพื่อแสดงความเห็น</div>
+                                <div onClick={() => setShowLoginModal(true)} className="w-full bg-white border border-gray-200 rounded-full py-1.5 px-3 text-[10px] text-gray-400 cursor-pointer shadow-sm text-left">เพิ่มความคิดเห็น...</div>
                             ) : (
-                                <textarea
-                                    value={newComment}
-                                    onChange={e => setNewComment(e.target.value)}
-                                    placeholder="เพิ่มความเห็น..."
-                                    className="w-full bg-white border border-gray-200 focus:border-green-400 focus:ring-2 focus:ring-green-100 rounded-2xl p-2.5 text-xs outline-none resize-none shadow-sm pb-8 custom-scrollbar min-h-[60px]"
-                                    rows="1"
-                                    onKeyDown={e => {
-                                        if (e.key === 'Enter' && !e.shiftKey) { 
-                                            e.preventDefault(); 
-                                            handleSubmit(e);
-                                        }
-                                    }}
-                                />
-                            )}
-                            {currentUser && !currentUser.isAnonymous && (
-                                <button type="submit" disabled={!newComment.trim() || submitting} className="absolute bottom-2 right-2 p-1.5 bg-green-500 text-white rounded-full disabled:opacity-40 disabled:bg-gray-400 hover:bg-green-600 transition-colors shadow-sm">
-                                    <svg className="w-3.5 h-3.5 transform -rotate-45 ml-0.5 mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-                                </button>
+                                <div className="flex items-center bg-white border border-gray-200 rounded-full shadow-sm overflow-hidden pr-1 text-[11px]">
+                                    <input
+                                        type="text"
+                                        value={newComment}
+                                        onChange={e => setNewComment(e.target.value)}
+                                        placeholder="เพิ่มความคิดเห็น..."
+                                        className="flex-1 py-1.5 px-3 outline-none min-w-0 bg-transparent"
+                                    />
+                                    <button type="submit" disabled={!newComment.trim() || submitting} className="p-1 px-2 text-blue-500 disabled:opacity-40 disabled:text-gray-400 font-bold transition-colors">
+                                        ส่ง
+                                    </button>
+                                </div>
                             )}
                         </div>
                     </form>
+
+                    {/* Portal-rendered modal */}
+                    {fullModal}
+                    {optionsPortal}
                 </div>
             );
         };
@@ -586,15 +716,15 @@
             if (!showProfileModal) return null;
 
             return (
-                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center animate-fade-in">
-                    <div className="bg-white w-full max-w-md h-full max-h-[100dvh] overflow-y-auto flex flex-col">
+                <div onClick={() => { setShowProfileModal(false); setProfileForceOpen(false); }} className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center animate-fade-in">
+                    <div onClick={e => e.stopPropagation()} className="bg-white w-full max-w-md h-full max-h-[100dvh] overflow-y-auto flex flex-col">
                         {/* Header */}
                         <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-shrink-0 bg-gradient-to-r from-green-500 to-green-600 text-white">
                             <div className="flex items-center gap-2">
                                 <Shield size={20} />
                                 <h2 className="text-lg font-bold">แก้ไขข้อมูลส่วนตัว</h2>
                             </div>
-                            {!profileForceOpen && <button onClick={() => setShowProfileModal(false)} className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center hover:bg-white/30"><X size={18} /></button>}
+                            <button onClick={() => { setShowProfileModal(false); setProfileForceOpen(false); }} className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center hover:bg-white/30"><X size={18} /></button>
                         </div>
 
                         {profileForceOpen && (
@@ -763,6 +893,7 @@
             const [showAllVariants, setShowAllVariants] = useState(false);
             const [zoomedImage, setZoomedImage] = useState(null);
             const [expandedComments, setExpandedComments] = useState({});
+            const [commentCounts, setCommentCounts] = useState({});
 
             // ── NEW: active category filter for search page ──
             const [activeCategoryFilter, setActiveCategoryFilter] = useState(null); // null = all
@@ -1618,7 +1749,7 @@
                                                             <div className="text-lg font-bold text-red-500">฿{deal.price}</div>
                                                             <div className="flex items-center gap-3 text-xs text-gray-400">
                                                                 <span className="flex items-center gap-1"><Heart size={14} /> {deal.likes}</span>
-                                                                <span className="flex items-center gap-1"><MessageSquare size={14} /> {deal.comments}</span>
+                                                                <span className="flex items-center gap-1"><MessageSquare size={14} /> {commentCounts[deal.id] ?? deal.comments ?? 0}</span>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -1650,7 +1781,7 @@
                                                             <div className="text-lg font-bold text-red-500">฿{deal.price}</div>
                                                             <div className="flex items-center gap-3 text-xs text-gray-400">
                                                                 <span className="flex items-center gap-1"><Heart size={14} className="text-red-500" fill="currentColor" /> {deal.likes}</span>
-                                                                <span className="flex items-center gap-1"><MessageSquare size={14} /> {deal.comments || 0}</span>
+                                                                <span className="flex items-center gap-1"><MessageSquare size={14} /> {commentCounts[deal.id] ?? deal.comments ?? 0}</span>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -2705,7 +2836,7 @@
                                                             <div className="flex items-center gap-2 mt-1">
                                                                 <LikeButton itemId={deal.id} currentUser={currentUser} setShowLoginModal={setShowLoginModal} />
                                                                 <button onClick={(e) => { e.stopPropagation(); setExpandedComments(prev => ({ ...prev, [deal.id]: !prev[deal.id] })) }} className="flex items-center gap-1 text-[11px] font-bold text-gray-500 hover:text-blue-500 transition-colors bg-gray-50 hover:bg-blue-50 px-2 py-1 rounded-lg border border-gray-100 shadow-sm leading-none h-[22px]">
-                                                                    <MessageSquare size={10} /> {deal.comments || 0}
+                                                                    <MessageSquare size={10} /> {commentCounts[deal.id] ?? deal.comments ?? 0}
                                                                 </button>
                                                                 <button onClick={(e) => { e.stopPropagation(); setPostReportDeal(deal); setPostReportReason(null); setPostReportText(''); }} className="p-1 text-gray-300 hover:text-gray-500 rounded-full hover:bg-gray-100 transition-colors" title="แจ้งปัญหาโพสต์นี้">
                                                                     <MoreVertical size={14} />
@@ -2721,6 +2852,7 @@
                                                     setShowLoginModal={setShowLoginModal}
                                                     expanded={!!expandedComments[deal.id]}
                                                     setExpanded={(val) => setExpandedComments(prev => ({ ...prev, [deal.id]: val }))}
+                                                    onCountUpdate={(cnt) => setCommentCounts(prev => ({ ...prev, [deal.id]: cnt }))}
                                                 />
                                             </div>
                                         );
@@ -3339,7 +3471,7 @@
                                             <div className="mt-6">
                                                 <button onClick={() => setExpandedComments(prev => ({ ...prev, [d.id]: !prev[d.id] }))} className="w-full flex items-center justify-center gap-2 py-3 bg-gray-50 border border-gray-100 rounded-xl text-gray-600 font-bold hover:bg-gray-100 transition-colors shadow-sm">
                                                     <MessageSquare size={16} />
-                                                    {expandedComments[d.id] ? 'ซ่อนความคิดเห็น' : `แสดงความคิดเห็น (${d.comments || 0})`}
+                                                    {expandedComments[d.id] ? 'ซ่อนความคิดเห็น' : `แสดงความคิดเห็น (${commentCounts[d.id] ?? d.comments ?? 0})`}
                                                 </button>
                                                 <div className="mt-2">
                                                     <CommentSection 
@@ -3348,6 +3480,7 @@
                                                         setShowLoginModal={setShowLoginModal}
                                                         expanded={!!expandedComments[d.id]}
                                                         setExpanded={(val) => setExpandedComments(prev => ({ ...prev, [d.id]: val }))}
+                                                        onCountUpdate={(cnt) => setCommentCounts(prev => ({ ...prev, [d.id]: cnt }))}
                                                     />
                                                 </div>
                                             </div>
