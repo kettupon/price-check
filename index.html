@@ -999,47 +999,69 @@
                 return () => unsubscribeAuth();
             }, []);
 
+            const signingInRef = useRef(false);
+
             const handleUpgradeToGoogle = async () => {
-                if (!currentUser || !currentUser.isAnonymous) {
-                    // Not a guest — just do normal sign in
-                    try { await signInWithPopup(auth, googleProvider); setShowLoginModal(false); }
-                    catch (error) { alert('เกิดข้อผิดพลาดในการเข้าสู่ระบบด้วย Google: ' + error.message); }
-                    return;
-                }
+                if (signingInRef.current) return;
+                signingInRef.current = true;
                 try {
-                    const provider = new GoogleAuthProvider();
-                    const result = await linkWithPopup(currentUser, provider);
-                    // Linked successfully — update existing posts with new display info
-                    const user = result.user;
-                    try {
-                        const q = query(collection(db, "items"), where("userId", "==", user.uid));
-                        const snap = await getDocs(q);
-                        const updates = snap.docs.map(d => updateDoc(doc(db, "items", d.id), {
-                            userDisplayName: user.displayName || 'ผู้ใช้',
-                            userPhotoURL: user.photoURL || null
-                        }));
-                        await Promise.all(updates);
-                    } catch (e) { console.error('Batch update posts error:', e); }
-                    setShowLoginModal(false);
-                } catch (error) {
-                    if (error.code === 'auth/credential-already-in-use') {
-                        const proceed = confirm('บัญชี Google นี้มีอยู่แล้ว โพสต์ที่โพสต์ในฐานะ Guest จะไม่ถูกย้าย\nต้องการเข้าสู่ระบบด้วยบัญชีที่มีอยู่แทนไหม?');
-                        if (proceed) {
-                            try { await signInWithPopup(auth, googleProvider); setShowLoginModal(false); }
-                            catch (e2) { alert('เกิดข้อผิดพลาด: ' + e2.message); }
+                    if (!currentUser || !currentUser.isAnonymous) {
+                        // Not a guest — just do normal sign in
+                        try { await signInWithPopup(auth, googleProvider); setShowLoginModal(false); }
+                        catch (error) {
+                            if (error.code !== 'auth/cancelled-popup-request' && error.code !== 'auth/popup-closed-by-user') {
+                                alert('เกิดข้อผิดพลาดในการเข้าสู่ระบบด้วย Google: ' + error.message);
+                            }
                         }
-                    } else {
-                        alert('เกิดข้อผิดพลาด: ' + error.message);
+                        return;
                     }
+                    try {
+                        const provider = new GoogleAuthProvider();
+                        const result = await linkWithPopup(currentUser, provider);
+                        const user = result.user;
+                        try {
+                            const q = query(collection(db, "items"), where("userId", "==", user.uid));
+                            const snap = await getDocs(q);
+                            const updates = snap.docs.map(d => updateDoc(doc(db, "items", d.id), {
+                                userDisplayName: user.displayName || 'ผู้ใช้',
+                                userPhotoURL: user.photoURL || null
+                            }));
+                            await Promise.all(updates);
+                        } catch (e) { console.error('Batch update posts error:', e); }
+                        setShowLoginModal(false);
+                    } catch (error) {
+                        if (error.code === 'auth/credential-already-in-use') {
+                            const proceed = confirm('บัญชี Google นี้มีอยู่แล้ว โพสต์ที่โพสต์ในฐานะ Guest จะไม่ถูกย้าย\nต้องการเข้าสู่ระบบด้วยบัญชีที่มีอยู่แทนไหม?');
+                            if (proceed) {
+                                try { await signInWithPopup(auth, googleProvider); setShowLoginModal(false); }
+                                catch (e2) {
+                                    if (e2.code !== 'auth/cancelled-popup-request' && e2.code !== 'auth/popup-closed-by-user') {
+                                        alert('เกิดข้อผิดพลาด: ' + e2.message);
+                                    }
+                                }
+                            }
+                        } else if (error.code !== 'auth/cancelled-popup-request' && error.code !== 'auth/popup-closed-by-user') {
+                            alert('เกิดข้อผิดพลาด: ' + error.message);
+                        }
+                    }
+                } finally {
+                    signingInRef.current = false;
                 }
             };
 
             const handleGoogleLogin = async () => {
+                if (signingInRef.current) return;
                 if (currentUser?.isAnonymous) {
                     return handleUpgradeToGoogle();
                 }
+                signingInRef.current = true;
                 try { await signInWithPopup(auth, googleProvider); setShowLoginModal(false); }
-                catch (error) { alert('เกิดข้อผิดพลาดในการเข้าสู่ระบบด้วย Google: ' + error.message); }
+                catch (error) {
+                    if (error.code !== 'auth/cancelled-popup-request' && error.code !== 'auth/popup-closed-by-user') {
+                        alert('เกิดข้อผิดพลาดในการเข้าสู่ระบบด้วย Google: ' + error.message);
+                    }
+                }
+                finally { signingInRef.current = false; }
             };
 
             const handleGuestLogin = async () => {
