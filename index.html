@@ -47,7 +47,16 @@
         }
 
         .animate-fade-in {
-            animation: fadeIn 0.3s ease-out forwards;
+            animation: fadeIn 0.25s ease-out forwards;
+        }
+
+        .animate-scale-in {
+            animation: scaleIn 0.2s ease-out forwards;
+        }
+
+        @keyframes scaleIn {
+            from { opacity: 0; transform: scale(0.92); }
+            to { opacity: 1; transform: scale(1); }
         }
 
         @keyframes fadeIn {
@@ -103,7 +112,7 @@
             MapPin, Users, Tag, AlertCircle, Plus, Trophy, Heart, MessageSquare,
             Share2, Search, Zap, Home, ListPlus, Calculator, ChevronLeft, ChevronRight, Image as ImageIcon,
             Coffee, ShoppingCart, Store, Package, User, X, ShoppingBag, ImageOff, Camera, FileText,
-            Grid, Folder, Bell, Clock, Link2, MoreVertical, Flag, CheckCircle2, XCircle, Edit3, Lock, Shield, Trash2
+            Grid, Folder, Bell, Clock, Link2, MoreVertical, Flag, CheckCircle2, XCircle, Edit3, Lock, Shield, Trash2, Check
         } from 'lucide-react';
         import { initializeApp } from 'firebase/app';
         import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDocs, updateDoc, where, doc, setDoc, increment, deleteDoc, getDoc, collectionGroup } from 'firebase/firestore';
@@ -177,8 +186,8 @@
             return { profile, loading, saveProfile };
         };
 
-        const useLikes = (itemId, currentUser, setShowLoginModal) => {
-            const [count, setCount] = useState(0);
+        const useLikes = (itemId, currentUser, setShowLoginModal, initialCount = 0) => {
+            const [count, setCount] = useState(initialCount);
             const [isLiked, setIsLiked] = useState(false);
 
             useEffect(() => {
@@ -327,7 +336,22 @@
             const [submitting, setSubmitting] = useState(false);
             const [showFullModal, setShowFullModal] = useState(false);
             const [optionsCommentId, setOptionsCommentId] = useState(null);
+            const [reportingComment, setReportingComment] = useState(null);
+            const [reportReason, setReportReason] = useState('ข้อมูลเท็จ');
+            const [reportDetail, setReportDetail] = useState('');
             const modalListRef = useRef(null);
+
+            const MIN_CHARS = 20;
+            const MAX_COMMENTS_PER_USER = 3;
+
+            // Count how many comments this user has on this post
+            const userCommentCount = currentUser && !currentUser.isAnonymous
+                ? comments.filter(c => c.userId === currentUser.uid).length
+                : 0;
+            const remainingComments = MAX_COMMENTS_PER_USER - userCommentCount;
+            const isLimitReached = remainingComments <= 0;
+            const charCount = newComment.trim().length;
+            const isTooShort = charCount > 0 && charCount < MIN_CHARS;
 
             useEffect(() => {
                 if (showFullModal && modalListRef.current) {
@@ -352,14 +376,23 @@
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
-                if (!newComment.trim() || submitting) return;
+                const trimmed = newComment.trim();
+                if (!trimmed || submitting) return;
                 if (!currentUser || currentUser.isAnonymous) {
                     setShowLoginModal(true);
                     return;
                 }
+                if (trimmed.length < MIN_CHARS) {
+                    alert(`ความคิดเห็นต้องมีอย่างน้อย ${MIN_CHARS} ตัวอักษร (ตอนนี้ ${trimmed.length} ตัวอักษร)`);
+                    return;
+                }
+                if (isLimitReached) {
+                    alert(`คุณแสดงความเห็นได้สูงสุด ${MAX_COMMENTS_PER_USER} ครั้งต่อโพสต์`);
+                    return;
+                }
                 setSubmitting(true);
                 try {
-                    await addComment(newComment.trim(), currentUser);
+                    await addComment(trimmed, currentUser);
                     setNewComment('');
                 } catch (e) {
                     alert('เกิดข้อผิดพลาดในการส่งความเห็น: ' + e.message);
@@ -367,29 +400,39 @@
                 setSubmitting(false);
             };
 
-            const handleReportComment = async (c) => {
+            const handleReportComment = (c) => {
                 if (!currentUser || currentUser.isAnonymous) {
                     setShowLoginModal(true);
                     return;
                 }
-                const reason = prompt('ระบุเหตุผลที่รายงานความคิดเห็นนี้:');
-                if (!reason) return;
+                setReportingComment(c);
+                setReportReason('ข้อมูลเท็จ');
+                setReportDetail('');
+                setOptionsCommentId(null);
+            };
+
+            const confirmReport = async () => {
+                if (!reportingComment) return;
+                setSubmitting(true);
                 try {
                     await addDoc(collection(db, "reports"), {
                         type: 'comment_report',
-                        commentId: c.id,
-                        commentText: c.text,
-                        commentUserId: c.userId,
+                        commentId: reportingComment.id,
+                        commentText: reportingComment.text,
+                        commentUserId: reportingComment.userId,
                         itemId: itemId,
                         reporterId: currentUser.uid,
-                        reason: reason,
+                        reason: reportReason,
+                        detail: reportDetail.trim(),
                         status: 'pending',
                         createdAt: Date.now()
                     });
+                    setReportingComment(null);
                     alert('ส่งรายงานเรียบร้อยแล้ว ขอบคุณครับ');
                 } catch (e) {
                     alert('เกิดข้อผิดพลาด: ' + e.message);
                 }
+                setSubmitting(false);
             };
 
             const handleDelete = async (commentId, userId) => {
@@ -404,6 +447,47 @@
             if (!expanded) return null;
 
             const visibleComments = comments.slice(-3);
+
+            // Shared comment input renderer (used in both inline and modal)
+            const renderCommentInput = (isModal = false) => {
+                if (!currentUser || currentUser.isAnonymous) {
+                    return isModal ? (
+                        <div onClick={() => setShowLoginModal(true)} className="w-full bg-gray-50 border border-gray-200 rounded-full py-2.5 px-4 text-xs text-gray-500 cursor-pointer shadow-sm text-center font-bold">เข้าสู่ระบบเพื่อแสดงความเห็น</div>
+                    ) : (
+                        <div onClick={() => setShowLoginModal(true)} className="w-full bg-white border border-gray-200 rounded-full py-1.5 px-3 text-[10px] text-gray-400 cursor-pointer shadow-sm text-left">เพิ่มความคิดเห็น...</div>
+                    );
+                }
+                if (isLimitReached) {
+                    return (
+                        <div className={isModal ? "w-full bg-gray-100 border border-gray-200 rounded-full py-2.5 px-4 text-xs text-gray-400 text-center font-medium" : "w-full bg-gray-100 border border-gray-200 rounded-full py-1.5 px-3 text-[10px] text-gray-400 text-center font-medium"}>
+                            คุณแสดงความเห็นครบ {MAX_COMMENTS_PER_USER}/{MAX_COMMENTS_PER_USER} แล้ว
+                        </div>
+                    );
+                }
+                return (
+                    <div>
+                        <div className={isModal ? "flex items-center bg-gray-50 border border-gray-200 rounded-full shadow-inner overflow-hidden pr-1.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 transition-all text-xs" : "flex items-center bg-white border border-gray-200 rounded-full shadow-sm overflow-hidden pr-1 text-[11px]"}>
+                            <input
+                                type="text"
+                                value={newComment}
+                                onChange={e => setNewComment(e.target.value)}
+                                placeholder={`เพิ่มความคิดเห็น (ขั้นต่ำ ${MIN_CHARS} ตัวอักษร)...`}
+                                className={isModal ? "flex-1 py-2.5 px-4 outline-none min-w-0 bg-transparent" : "flex-1 py-1.5 px-3 outline-none min-w-0 bg-transparent"}
+                                maxLength={500}
+                            />
+                            <span className={`text-[9px] px-1 whitespace-nowrap ${isTooShort ? 'text-orange-400' : 'text-gray-300'}`}>{charCount}/{MIN_CHARS}+</span>
+                            <button type="submit" disabled={!newComment.trim() || isTooShort || submitting} className={isModal ? "p-1.5 px-3 text-blue-500 disabled:opacity-40 disabled:text-gray-400 font-bold transition-colors" : "p-1 px-2 text-blue-500 disabled:opacity-40 disabled:text-gray-400 font-bold transition-colors"}>
+                                ส่ง
+                            </button>
+                        </div>
+                        <div className="flex justify-between items-center mt-1 px-1">
+                            {isTooShort && <span className="text-[9px] text-orange-400">ต้องมีอย่างน้อย {MIN_CHARS} ตัวอักษร</span>}
+                            {!isTooShort && <span />}
+                            <span className={`text-[9px] font-bold ${remainingComments === 1 ? 'text-orange-400' : 'text-gray-300'}`}>{userCommentCount}/{MAX_COMMENTS_PER_USER}</span>
+                        </div>
+                    </div>
+                );
+            };
 
             // Render the dropdown menu for a comment
             const renderOptionsMenu = (c) => (
@@ -458,25 +542,8 @@
                         </div>
 
                         <div className="p-3 border-t border-gray-100 bg-white shrink-0" style={{paddingBottom:'max(12px, env(safe-area-inset-bottom))'}}>
-                            <form onSubmit={handleSubmit} className="flex gap-2 items-center">
-                                <div className="flex-1">
-                                    {(!currentUser || currentUser.isAnonymous) ? (
-                                        <div onClick={() => setShowLoginModal(true)} className="w-full bg-gray-50 border border-gray-200 rounded-full py-2.5 px-4 text-xs text-gray-500 cursor-pointer shadow-sm text-center font-bold">เข้าสู่ระบบเพื่อแสดงความเห็น</div>
-                                    ) : (
-                                        <div className="flex items-center bg-gray-50 border border-gray-200 rounded-full shadow-inner overflow-hidden pr-1.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 transition-all">
-                                            <input
-                                                type="text"
-                                                value={newComment}
-                                                onChange={e => setNewComment(e.target.value)}
-                                                placeholder="เพิ่มความคิดเห็น..."
-                                                className="flex-1 py-2.5 px-4 outline-none min-w-0 bg-transparent text-xs"
-                                            />
-                                            <button type="submit" disabled={!newComment.trim() || submitting} className="p-1.5 px-3 text-blue-500 disabled:opacity-40 disabled:text-gray-400 font-bold transition-colors">
-                                                ส่ง
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
+                            <form onSubmit={handleSubmit}>
+                                {renderCommentInput(true)}
                             </form>
                         </div>
                     </div>
@@ -512,11 +579,9 @@
                                         </div>
                                         <div className="flex items-baseline gap-2 shrink-0">
                                             <span className="text-[9px] text-gray-400 whitespace-nowrap">{new Date(c.createdAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</span>
-                                            {currentUser && currentUser.uid === c.userId && (
-                                                <button onClick={() => handleDelete(c.id, c.userId)} className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <X size={10} />
-                                                </button>
-                                            )}
+                                            <button data-comment-opt={c.id} onClick={(e) => { e.stopPropagation(); setOptionsCommentId(optionsCommentId === c.id ? null : c.id); }} className="text-gray-400 hover:text-gray-600 transition-colors p-1 rounded hover:bg-gray-100 ml-1">
+                                                <MoreVertical size={12} />
+                                            </button>
                                         </div>
                                     </div>
                                 ))
@@ -525,36 +590,67 @@
                     )}
 
                     {/* Inline comment form */}
-                    <form onSubmit={handleSubmit} className="flex gap-2 items-center mt-1">
-                        <div className="flex-1 relative">
-                            {(!currentUser || currentUser.isAnonymous) ? (
-                                <div onClick={() => setShowLoginModal(true)} className="w-full bg-white border border-gray-200 rounded-full py-1.5 px-3 text-[10px] text-gray-400 cursor-pointer shadow-sm text-left">เพิ่มความคิดเห็น...</div>
-                            ) : (
-                                <div className="flex items-center bg-white border border-gray-200 rounded-full shadow-sm overflow-hidden pr-1 text-[11px]">
-                                    <input
-                                        type="text"
-                                        value={newComment}
-                                        onChange={e => setNewComment(e.target.value)}
-                                        placeholder="เพิ่มความคิดเห็น..."
-                                        className="flex-1 py-1.5 px-3 outline-none min-w-0 bg-transparent"
-                                    />
-                                    <button type="submit" disabled={!newComment.trim() || submitting} className="p-1 px-2 text-blue-500 disabled:opacity-40 disabled:text-gray-400 font-bold transition-colors">
-                                        ส่ง
-                                    </button>
-                                </div>
-                            )}
-                        </div>
+                    <form onSubmit={handleSubmit} className="mt-1">
+                        {renderCommentInput(false)}
                     </form>
 
                     {/* Portal-rendered modal */}
                     {fullModal}
                     {optionsPortal}
+                    {reportingComment && createPortal(
+                        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in" onClick={() => setReportingComment(null)}>
+                            <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl overflow-hidden animate-scale-in" onClick={e => e.stopPropagation()}>
+                                <div className="bg-orange-500 p-6 text-white text-center">
+                                    <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-3">
+                                        <AlertCircle size={24} />
+                                    </div>
+                                    <h3 className="text-lg font-bold">รายงานความคิดเห็น</h3>
+                                    <p className="text-orange-100 text-[11px] mt-1 line-clamp-1 italic">"{reportingComment.text}"</p>
+                                </div>
+                                
+                                <div className="p-5 space-y-4">
+                                    <div>
+                                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-2">เลือกเหตุผล</label>
+                                        <div className="space-y-2">
+                                            {['ข้อมูลเท็จ', 'คำหยาบ', 'เนื้อหาไม่เหมาะสม'].map(r => (
+                                                <button key={r} onClick={() => setReportReason(r)} className={`w-full flex items-center justify-between p-3 rounded-xl border text-xs font-bold transition-all ${reportReason === r ? 'bg-orange-50 border-orange-200 text-orange-600' : 'bg-gray-50 border-gray-100 text-gray-500 hover:border-gray-200'}`}>
+                                                    {r}
+                                                    {reportReason === r && <Check size={14} />}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <div className="flex justify-between items-center mb-1.5">
+                                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">รายละเอียดเพิ่มเติม</label>
+                                            <span className={`text-[9px] font-bold ${reportDetail.length > 50 ? 'text-red-500' : 'text-gray-300'}`}>{reportDetail.length}/50</span>
+                                        </div>
+                                        <textarea 
+                                            value={reportDetail}
+                                            onChange={e => setReportDetail(e.target.value.slice(0, 50))}
+                                            placeholder="บอกรายละเอียดเพิ่มเติมเพื่อให้เราตรวจสอบได้ง่ายขึ้น..."
+                                            className="w-full h-20 p-3 bg-gray-50 border border-gray-100 rounded-xl text-xs outline-none focus:border-orange-300 focus:ring-1 focus:ring-orange-100 transition-all resize-none"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="p-4 bg-gray-50 flex gap-3">
+                                    <button onClick={() => setReportingComment(null)} className="flex-1 py-3 text-sm font-bold text-gray-400 bg-white border border-gray-200 rounded-xl hover:bg-gray-100 transition-colors">ยกเลิก</button>
+                                    <button onClick={confirmReport} disabled={submitting} className="flex-1 py-3 text-sm font-bold text-white bg-orange-500 rounded-xl hover:bg-orange-600 shadow-lg shadow-orange-200 transition-all active:scale-95 disabled:opacity-50">
+                                        {submitting ? 'กำลังส่ง...' : 'ส่งรายงาน'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>,
+                        document.body
+                    )}
                 </div>
             );
         };
 
-        const LikeButton = ({ itemId, currentUser, setShowLoginModal }) => {
-            const { count, isLiked, toggleLike } = useLikes(itemId, currentUser, setShowLoginModal);
+        const LikeButton = ({ itemId, currentUser, setShowLoginModal, initialCount = 0 }) => {
+            const { count, isLiked, toggleLike } = useLikes(itemId, currentUser, setShowLoginModal, initialCount);
             const [isAnimating, setIsAnimating] = useState(false);
 
             const handleClick = (e) => {
@@ -888,6 +984,8 @@
             const [showConfirmModal, setShowConfirmModal] = useState(false);
             const [deals, setDeals] = useState([]);
             const [groupedDeals, setGroupedDeals] = useState([]);
+            const [feedLoaded, setFeedLoaded] = useState(false);
+            const [feedLimit, setFeedLimit] = useState(10);
             const [searchQuery, setSearchQuery] = useState('');
             const [selectedProduct, setSelectedProduct] = useState(null);
             const [showAllVariants, setShowAllVariants] = useState(false);
@@ -955,6 +1053,28 @@
             }, [toastMessage]);
 
             const pendingActionRef = useRef(null);
+            const sentinelRef = useRef(null);
+
+            // Infinite scroll observer
+            useEffect(() => {
+                const observer = new IntersectionObserver((entries) => {
+                    const first = entries[0];
+                    if (first.isIntersecting && feedLoaded) {
+                        setFeedLimit(prev => prev + 10);
+                    }
+                }, { threshold: 0.1 });
+
+                const currentSentinel = sentinelRef.current;
+                if (currentSentinel) {
+                    observer.observe(currentSentinel);
+                }
+
+                return () => {
+                    if (currentSentinel) {
+                        observer.unobserve(currentSentinel);
+                    }
+                };
+            }, [feedLoaded]);
 
             useEffect(() => {
                 const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
@@ -1201,7 +1321,8 @@
                                 shop: data.store || "ไม่ระบุร้าน", distance: "? km",
                                 masterImage: data.masterImage || "",
                                 stickers: ppu < 10 ? ["🔥 คุ้มสุด!"] : [],
-                                comments: 0, image: data.image || "",
+                                likes: data.likes || 0,
+                                comments: data.comments || 0, image: data.image || "",
                                 timePosted: new Date(data.lastUpdated).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }),
                                 reporter: "Live User",
                                 cashbackUsed: data.cashbackUsed || false,
@@ -1220,6 +1341,7 @@
                             };
                         });
                     setDeals(fbDeals);
+                    if (!feedLoaded) setFeedLoaded(true);
 
                     const grouped = {};
                     fbDeals.forEach(deal => {
@@ -1313,6 +1435,7 @@
             const [subUnitMode, setSubUnitMode] = useState(null);
             const [subUnitCategory, setSubUnitCategory] = useState(null);
             const [subUnitEqual, setSubUnitEqual] = useState(null);
+            const [subUnitSizes, setSubUnitSizes] = useState([]);
             const [shippingType, setShippingType] = useState('included');
             const [shippingFee, setShippingFee] = useState('');
             const [tags, setTags] = useState([]);
@@ -1422,8 +1545,9 @@
                         const base = parseFloat(subUnitSize) || 0;
                         return subUnitCount * base * (TO_BASE[subUnitSizeType] || 1);
                     }
-                    if (!subUnitEqual && subUnitSize) {
-                        return parseFloat(subUnitSize) * (TO_BASE[subUnitSizeType] || 1);
+                    if (!subUnitEqual && subUnitSizes.length > 0) {
+                        const sum = subUnitSizes.reduce((acc, s) => acc + (parseFloat(s.size) || 0), 0);
+                        return sum * (TO_BASE[subUnitSizeType] || 1);
                     }
                     return 0;
                 }
@@ -1461,9 +1585,13 @@
                         subUnit: subUnit || 'ชิ้น',
                         subUnitMode: subUnitMode || 'one',
                         subUnitCount: parseInt(subUnitCount) || 1,
-                        subUnitSize: subUnitSize ? parseFloat(subUnitSize) : null,
+                        subUnitSize: !subUnitEqual && subUnitSizes.length > 0
+                            ? subUnitSizes.reduce((acc, s) => acc + (parseFloat(s.size) || 0), 0)
+                            : (subUnitSize ? parseFloat(subUnitSize) : null),
                         subUnitSizeType: subUnitSizeType || null,
                         subUnitCategory: subUnitCategory || 'none',
+                        subUnitSizes: !subUnitEqual && subUnitSizes.length > 0 ? subUnitSizes : null,
+                        subUnitEqual: subUnitEqual ?? null,
                         totalVolume: totalVolume || null,
                         ppuVolume: ppuVolume || null,
                         tags, promoCodeUsed: usePromo, promoCode: usePromo ? promoCode : '',
@@ -1477,7 +1605,7 @@
                         productUrl: productUrl || ''
                     });
                     setItemName(''); setBrand(''); setPrice(''); setUnit(1); setUnitDisplay('1'); setStore('');
-                    setSubUnit('ชิ้น'); setSubUnitCount(1); setSubUnitSize(''); setSubUnitSizeType('ml'); setSubUnitMode(null); setSubUnitCategory(null); setSubUnitEqual(null);
+                    setSubUnit('ชิ้น'); setSubUnitCount(1); setSubUnitSize(''); setSubUnitSizeType('ml'); setSubUnitMode(null); setSubUnitCategory(null); setSubUnitEqual(null); setSubUnitSizes([]);
                     setUseCashback(false); setCashbackAmount(''); setUsePromo(false); setPromoCode('');
                     setIsMemberPrice(false); setProductUrl('');
                     setImageBase64(null); setTags([]); setTagInput(''); setShippingType('included');
@@ -1866,38 +1994,74 @@
             );
             };
             // ── FEED: shipping toggle only, no dummy category tabs ──
-            const renderFeed = () => (
-                <div className="flex-1 overflow-y-auto p-3 bg-gray-100 pb-24 animate-fade-in">
-                    {/* Only shipping toggle remains */}
-                    <div className="flex gap-2 mb-3 px-1">
-                        <button
-                            onClick={() => setShowShippingInFeed(v => !v)}
-                            className={`whitespace-nowrap px-4 py-1.5 rounded-full text-[11px] font-bold shadow-sm transition-colors border flex items-center gap-1.5 ${showShippingInFeed ? 'bg-orange-500 text-white border-orange-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
-                            รวมค่าจัดส่ง
-                        </button>
-                        <button
-                            onClick={() => setShowVolumeInFeed(v => !v)}
-                            className={`whitespace-nowrap px-4 py-1.5 rounded-full text-[11px] font-bold transition-colors shadow-sm flex items-center gap-1.5 border ${showVolumeInFeed
-                                ? 'bg-blue-500 text-white border-blue-600'
-                                : 'bg-white text-blue-500 border-blue-300 hover:bg-blue-50'}`}>
-                            {showVolumeInFeed ? 'แสดง ฿/100ml' : 'แสดง ฿/หน่วย'}
-                        </button>
+            const renderFeed = () => {
+                // Build the deduplicated feed list
+                const feedItems = (() => {
+                    const seenVG = new Set();
+                    return groupedDeals.filter(deal => {
+                        const vg = variantGroups.find(v => v.items && v.items.includes(deal.name));
+                        if (vg && vg.items.length >= 2) {
+                            if (seenVG.has(vg.id)) return false;
+                            seenVG.add(vg.id);
+                        }
+                        return true;
+                    });
+                })();
+
+                const visibleItems = feedItems.slice(0, feedLimit);
+                const hasMore = feedItems.length > feedLimit;
+
+                return (
+                    <div className="flex-1 overflow-y-auto p-3 bg-gray-100 pb-24 animate-fade-in">
+                        {/* Only shipping toggle remains */}
+                        <div className="flex gap-2 mb-3 px-1">
+                            <button
+                                onClick={() => setShowShippingInFeed(v => !v)}
+                                className={`whitespace-nowrap px-4 py-1.5 rounded-full text-[11px] font-bold shadow-sm transition-colors border flex items-center gap-1.5 ${showShippingInFeed ? 'bg-orange-500 text-white border-orange-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
+                                รวมค่าจัดส่ง
+                            </button>
+                            <button
+                                onClick={() => setShowVolumeInFeed(v => !v)}
+                                className={`whitespace-nowrap px-4 py-1.5 rounded-full text-[11px] font-bold transition-colors shadow-sm flex items-center gap-1.5 border ${showVolumeInFeed
+                                    ? 'bg-blue-500 text-white border-blue-600'
+                                    : 'bg-white text-blue-500 border-blue-300 hover:bg-blue-50'}`}>
+                                {showVolumeInFeed ? 'แสดง ฿/100ml' : 'แสดง ฿/หน่วย'}
+                            </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            {!feedLoaded ? (
+                                Array.from({ length: 6 }).map((_, i) => (
+                                    <div key={`sk-${i}`} className="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 animate-pulse">
+                                        <div className="aspect-square bg-gray-200" />
+                                        <div className="p-3 space-y-2">
+                                            <div className="h-3 bg-gray-200 rounded-full w-3/4" />
+                                            <div className="h-2.5 bg-gray-100 rounded-full w-1/2" />
+                                            <div className="flex justify-between items-center mt-2">
+                                                <div className="h-4 bg-gray-200 rounded-full w-1/3" />
+                                                <div className="h-3 bg-gray-100 rounded-full w-1/4" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                visibleItems.map(deal => renderProductCard(deal, false))
+                            )}
+                        </div>
+
+                        {/* Sentinel for infinite scroll */}
+                        {feedLoaded && hasMore && (
+                            <div ref={sentinelRef} className="py-8 flex justify-center items-center">
+                                <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                                <span className="ml-3 text-xs text-gray-400 font-medium italic">กำลังโหลดรายการเพิ่มเติม...</span>
+                            </div>
+                        )}
+
+                        {feedLoaded && !hasMore && feedItems.length > 10 && (
+                            <div className="text-center py-8 text-[10px] text-gray-400 font-medium italic">— คุณเลื่อนมาถึงจุดสิ้นสุดแล้ว ✨ —</div>
+                        )}
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                        {(() => {
-                            const seenVG = new Set();
-                            return groupedDeals.map(deal => {
-                                const vg = variantGroups.find(v => v.items && v.items.includes(deal.name));
-                                if (vg && vg.items.length >= 2) {
-                                    if (seenVG.has(vg.id)) return null; // skip duplicate variant group members
-                                    seenVG.add(vg.id);
-                                }
-                                return renderProductCard(deal, false);
-                            });
-                        })()}
-                    </div>
-                </div>
-            );
+                );
+            };
 
             // ── SEARCH: real category chips from Firestore, category badges on cards ──
             const renderSearch = () => {
@@ -2543,24 +2707,86 @@
                                             </div>
                                         )}
 
-                                        {/* ไม่เท่ากัน → กรอกปริมาณรวม */}
-                                        {subUnitEqual === false && (
-                                            <div className="animate-fade-in space-y-2">
-                                                <div className="text-xs font-bold text-gray-500">กรอกปริมาณรวมทั้งหมด</div>
-                                                <div className="flex gap-2">
-                                                    <input type="number" placeholder="ปริมาณรวม"
-                                                        value={subUnitSize}
-                                                        inputMode="decimal"
-                                                        onChange={e => setSubUnitSize(e.target.value)}
-                                                        className="flex-1 p-3 bg-gray-50 rounded-xl text-sm font-bold text-gray-800 border-2 border-transparent focus:border-orange-400 outline-none text-center" />
-                                                    <select value={subUnitSizeType}
-                                                        onChange={e => setSubUnitSizeType(e.target.value)}
-                                                        className="px-3 bg-gray-50 rounded-xl text-sm font-bold text-gray-700 border-2 border-transparent focus:border-orange-400 outline-none">
-                                                        {['ml','L','g','kg'].map(u => <option key={u}>{u}</option>)}
-                                                    </select>
+                                        {/* ไม่เท่ากัน → กรอกปริมาณแต่ละชิ้น */}
+                                        {subUnitEqual === false && (() => {
+                                            // Auto-init/resize subUnitSizes when entering this mode
+                                            if (subUnitSizes.length !== subUnitCount) {
+                                                const next = Array.from({ length: subUnitCount }, (_, i) => subUnitSizes[i] || { size: '' });
+                                                setTimeout(() => setSubUnitSizes(next), 0);
+                                            }
+                                            return (
+                                            <div className="animate-fade-in space-y-3">
+                                                <div className="text-xs font-bold text-gray-500">แต่ละ{subUnit}มีปริมาณระบุไหม?</div>
+                                                <div className="grid grid-cols-3 gap-2 mb-1">
+                                                    {[
+                                                        { key: 'volume', label: 'ปริมาตร' },
+                                                        { key: 'weight', label: 'น้ำหนัก' },
+                                                        { key: 'custom', label: 'ระบุเอง' },
+                                                        { key: 'none',   label: 'ไม่ระบุ' },
+                                                    ].map(({ key, label }) => (
+                                                        <button key={key} type="button"
+                                                            onClick={() => setSubUnitCategory(key)}
+                                                            className={`py-2 rounded-xl border-2 font-bold text-[10px] transition-all ${
+                                                                subUnitCategory === key
+                                                                    ? 'border-orange-400 bg-orange-50 text-orange-600'
+                                                                    : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-orange-200'
+                                                            }`}>
+                                                            {label}
+                                                        </button>
+                                                    ))}
                                                 </div>
+
+                                                {(subUnitCategory === 'volume' || subUnitCategory === 'weight' || subUnitCategory === 'custom') && (
+                                                    <div className="animate-fade-in space-y-2">
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="text-xs font-bold text-gray-500">กรอกปริมาณแต่ละ{subUnit}</div>
+                                                            {subUnitCategory === 'custom' ? (
+                                                                <div className="flex items-center gap-1">
+                                                                    <span className="text-[10px] text-gray-400">หน่วย:</span>
+                                                                    <input type="text" placeholder="หน่วย" value={subUnitSizeType} onChange={e => setSubUnitSizeType(e.target.value)} className="w-16 px-2 py-1 bg-gray-50 rounded-lg text-[10px] font-bold text-gray-700 border border-gray-200 focus:border-orange-400 outline-none text-center" />
+                                                                </div>
+                                                            ) : (
+                                                                <select value={subUnitSizeType}
+                                                                    onChange={e => setSubUnitSizeType(e.target.value)}
+                                                                    className="px-2 py-1 bg-gray-50 rounded-lg text-[10px] font-bold text-gray-700 border border-gray-200 focus:border-orange-400 outline-none">
+                                                                    {subUnitCategory === 'volume'
+                                                                        ? ['ml','L','cc'].map(u => <option key={u}>{u}</option>)
+                                                                        : ['g','kg'].map(u => <option key={u}>{u}</option>)
+                                                                    }
+                                                                </select>
+                                                            )}
+                                                        </div>
+                                                        <div className="space-y-1.5">
+                                                            {subUnitSizes.map((item, idx) => (
+                                                                <div key={idx} className="flex items-center gap-2">
+                                                                    <span className="text-[10px] font-bold text-gray-400 w-14 text-right shrink-0">{subUnit} {idx + 1}</span>
+                                                                    <input type="number" placeholder="ปริมาณ"
+                                                                        value={item.size}
+                                                                        inputMode="decimal"
+                                                                        onChange={e => {
+                                                                            const next = [...subUnitSizes];
+                                                                            next[idx] = { ...next[idx], size: e.target.value };
+                                                                            setSubUnitSizes(next);
+                                                                        }}
+                                                                        className="flex-1 p-2.5 bg-gray-50 rounded-xl text-sm font-bold text-gray-800 border-2 border-transparent focus:border-orange-400 outline-none text-center" />
+                                                                    <span className="text-[10px] font-bold text-gray-400 w-8">{subUnitSizeType}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                        {subUnitSizes.some(s => s.size) && (() => {
+                                                            const total = subUnitSizes.reduce((acc, s) => acc + (parseFloat(s.size) || 0), 0);
+                                                            return (
+                                                                <div className="bg-orange-50 border border-orange-200 rounded-xl p-2.5 flex items-center justify-between">
+                                                                    <span className="text-[10px] font-bold text-orange-500">รวมทั้งหมด</span>
+                                                                    <span className="text-sm font-bold text-orange-600">{total} {subUnitSizeType}</span>
+                                                                </div>
+                                                            );
+                                                        })()}
+                                                    </div>
+                                                )}
                                             </div>
-                                        )}
+                                            );
+                                        })()}
                                     </div>
                                 )}
 
@@ -2572,8 +2798,8 @@
                                     const sizeText = (subUnitCategory === 'volume' || subUnitCategory === 'weight' || subUnitCategory === 'custom') && subUnitSize
                                         ? subUnitMode === 'many' && subUnitEqual
                                             ? `· ${subUnit}ละ ${subUnitSize}${subUnitSizeType} · รวม ${(subUnitCount * parseFloat(subUnitSize)).toFixed(0)}${subUnitSizeType}`
-                                            : subUnitMode === 'many' && !subUnitEqual
-                                            ? `· รวม ${subUnitSize}${subUnitSizeType}`
+                                            : subUnitMode === 'many' && !subUnitEqual && subUnitSizes.length > 0
+                                            ? `· รวม ${subUnitSizes.reduce((a, s) => a + (parseFloat(s.size) || 0), 0)}${subUnitSizeType}`
                                             : `· ${subUnitSize}${subUnitSizeType}`
                                         : '';
                                     return (
@@ -2856,7 +3082,7 @@
                                                                 <span className="text-[10px] text-gray-400 truncate max-w-[80px]">{deal.userDisplayName}</span>
                                                             </div>
                                                             <div className="flex items-center gap-2 mt-1">
-                                                                <LikeButton itemId={deal.id} currentUser={currentUser} setShowLoginModal={setShowLoginModal} />
+                                                                <LikeButton itemId={deal.id} currentUser={currentUser} setShowLoginModal={setShowLoginModal} initialCount={deal.likes} />
                                                                 <button onClick={(e) => { e.stopPropagation(); setExpandedComments(prev => ({ ...prev, [deal.id]: !prev[deal.id] })) }} className="flex items-center gap-1 text-[11px] font-bold text-gray-500 hover:text-blue-500 transition-colors bg-gray-50 hover:bg-blue-50 px-2 py-1 rounded-lg border border-gray-100 shadow-sm leading-none h-[22px]">
                                                                     <MessageSquare size={10} /> {commentCounts[deal.id] ?? deal.comments ?? 0}
                                                                 </button>
@@ -2896,6 +3122,7 @@
                                 setSubUnitSizeType(selectedProduct.subUnitSizeType || 'ml');
                                 setSubUnitCategory(selectedProduct.subUnitCategory || 'none');
                                 setSubUnitEqual(selectedProduct.subUnitEqual ?? null);
+                                setSubUnitSizes(selectedProduct.subUnitSizes || []);
                                 setIsItemLocked(true);
                                 setCurrentView('add');
                             }}
@@ -3383,7 +3610,7 @@
                                                     {storeMeta?.isOfficial && <span className="text-[8px] bg-blue-500 text-white px-1 rounded-sm shadow-sm">★</span>}
                                                 </div>
                                                 <div className="mt-2.5">
-                                                    <LikeButton itemId={d.id} currentUser={currentUser} setShowLoginModal={setShowLoginModal} />
+                                                    <LikeButton itemId={d.id} currentUser={currentUser} setShowLoginModal={setShowLoginModal} initialCount={d.likes} />
                                                 </div>
                                             </div>
                                             <button onClick={() => setSelectedDealDetail(null)} className="w-8 h-8 bg-gray-100 text-gray-400 rounded-full flex items-center justify-center hover:bg-gray-200 flex-shrink-0"><X size={18} /></button>
