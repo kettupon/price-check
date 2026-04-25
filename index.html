@@ -5,6 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>DealHunter Prototype</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;700&display=swap"
+        rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -55,8 +57,15 @@
         }
 
         @keyframes scaleIn {
-            from { opacity: 0; transform: scale(0.92); }
-            to { opacity: 1; transform: scale(1); }
+            from {
+                opacity: 0;
+                transform: scale(0.92);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
         }
 
         @keyframes fadeIn {
@@ -84,6 +93,15 @@
         .animate-slide-up {
             animation: slideUp 0.3s ease-out forwards;
         }
+
+        @keyframes pulseOrangeYellow {
+            0%, 100% { background-color: #F97316; box-shadow: 0 0 12px rgba(249,115,22,0.5); }
+            50% { background-color: #FBBF24; box-shadow: 0 0 18px rgba(251,191,36,0.6); }
+        }
+
+        .animate-pulse-oy {
+            animation: pulseOrangeYellow 1.5s ease-in-out infinite;
+        }
     </style>
     <script type="importmap">
       {
@@ -94,7 +112,8 @@
           "lucide-react": "https://esm.sh/lucide-react@0.294.0",
           "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
           "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js",
-          "firebase/auth": "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js"
+          "firebase/auth": "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js",
+          "firebase/storage": "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js"
         }
       }
     </script>
@@ -112,11 +131,12 @@
             MapPin, Users, Tag, AlertCircle, Plus, Trophy, Heart, MessageSquare,
             Share2, Search, Zap, Home, ListPlus, Calculator, ChevronLeft, ChevronRight, Image as ImageIcon,
             Coffee, ShoppingCart, Store, Package, User, X, ShoppingBag, ImageOff, Camera, FileText,
-            Grid, Folder, Bell, Clock, Link2, MoreVertical, Flag, CheckCircle2, XCircle, Edit3, Lock, Shield, Trash2, Check
+            Grid, Folder, Bell, Clock, Link2, MoreVertical, Flag, CheckCircle2, XCircle, Edit3, Lock, Shield, ShieldCheck, Trash2, Check, Settings, Upload, CheckCircle
         } from 'lucide-react';
         import { initializeApp } from 'firebase/app';
         import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDocs, updateDoc, where, doc, setDoc, increment, deleteDoc, getDoc, collectionGroup } from 'firebase/firestore';
         import { getAuth, signInWithPopup, linkWithPopup, GoogleAuthProvider, signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth';
+        import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 
         const firebaseConfig = {
             apiKey: "AIzaSyByDvi-wyekFdKMiMv_Cb2yUq9yF0Tw3Uc",
@@ -129,36 +149,37 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
+        const storage = getStorage(app);
         const googleProvider = new GoogleAuthProvider();
         const UNIT_OPTIONS = {
-            volume: ['ml','ลิตร','L','cc'],
-            weight: ['g','กรัม','kg','กิโลกรัม'],
-            count:  ['ชิ้น','แพ็ค','ถุง','กล่อง','อัน','ใบ','คู่']
+            volume: ['ml', 'ลิตร', 'L', 'cc'],
+            weight: ['g', 'กรัม', 'kg', 'กิโลกรัม'],
+            count: ['ชิ้น', 'แพ็ค', 'ถุง', 'กล่อง', 'อัน', 'ใบ', 'คู่']
         };
         const TO_BASE = {
             ml: 1, cc: 1, ลิตร: 1000, L: 1000,
             g: 1, กรัม: 1, kg: 1000, กิโลกรัม: 1000
         };
         const detectCategory = (u) => {
-            if (['ml','cc','ลิตร','L'].includes(u)) return 'volume';
-            if (['g','กรัม','kg','กิโลกรัม'].includes(u)) return 'weight';
+            if (['ml', 'cc', 'ลิตร', 'L'].includes(u)) return 'volume';
+            if (['g', 'กรัม', 'kg', 'กิโลกรัม'].includes(u)) return 'weight';
             return 'count';
         };
         const QUICK_SIZES = {
-            volume: [60,100,200,250,330,500,1000],
-            weight: [50,100,200,500,1000]
+            volume: [60, 100, 200, 250, 330, 500, 1000],
+            weight: [50, 100, 200, 500, 1000]
         };
         const THAI_PROVINCES = [
-            'กระบี่','กรุงเทพมหานคร','กาญจนบุรี','กาฬสินธุ์','กำแพงเพชร','ขอนแก่น','จันทบุรี','ฉะเชิงเทรา',
-            'ชลบุรี','ชัยนาท','ชัยภูมิ','ชุมพร','เชียงราย','เชียงใหม่','ตรัง','ตราด','ตาก','นครนายก',
-            'นครปฐม','นครพนม','นครราชสีมา','นครศรีธรรมราช','นครสวรรค์','นนทบุรี','นราธิวาส','น่าน',
-            'บึงกาฬ','บุรีรัมย์','ปทุมธานี','ประจวบคีรีขันธ์','ปราจีนบุรี','ปัตตานี','พระนครศรีอยุธยา',
-            'พะเยา','พังงา','พัทลุง','พิจิตร','พิษณุโลก','เพชรบุรี','เพชรบูรณ์','แพร่','ภูเก็ต',
-            'มหาสารคาม','มุกดาหาร','แม่ฮ่องสอน','ยโสธร','ยะลา','ร้อยเอ็ด','ระนอง','ระยอง','ราชบุรี',
-            'ลพบุรี','ลำปาง','ลำพูน','เลย','ศรีสะเกษ','สกลนคร','สงขลา','สตูล','สมุทรปราการ',
-            'สมุทรสงคราม','สมุทรสาคร','สระแก้ว','สระบุรี','สิงห์บุรี','สุโขทัย','สุพรรณบุรี',
-            'สุราษฎร์ธานี','สุรินทร์','หนองคาย','หนองบัวลำภู','อ่างทอง','อำนาจเจริญ','อุดรธานี',
-            'อุตรดิตถ์','อุทัยธานี','อุบลราชธานี'
+            'กระบี่', 'กรุงเทพมหานคร', 'กาญจนบุรี', 'กาฬสินธุ์', 'กำแพงเพชร', 'ขอนแก่น', 'จันทบุรี', 'ฉะเชิงเทรา',
+            'ชลบุรี', 'ชัยนาท', 'ชัยภูมิ', 'ชุมพร', 'เชียงราย', 'เชียงใหม่', 'ตรัง', 'ตราด', 'ตาก', 'นครนายก',
+            'นครปฐม', 'นครพนม', 'นครราชสีมา', 'นครศรีธรรมราช', 'นครสวรรค์', 'นนทบุรี', 'นราธิวาส', 'น่าน',
+            'บึงกาฬ', 'บุรีรัมย์', 'ปทุมธานี', 'ประจวบคีรีขันธ์', 'ปราจีนบุรี', 'ปัตตานี', 'พระนครศรีอยุธยา',
+            'พะเยา', 'พังงา', 'พัทลุง', 'พิจิตร', 'พิษณุโลก', 'เพชรบุรี', 'เพชรบูรณ์', 'แพร่', 'ภูเก็ต',
+            'มหาสารคาม', 'มุกดาหาร', 'แม่ฮ่องสอน', 'ยโสธร', 'ยะลา', 'ร้อยเอ็ด', 'ระนอง', 'ระยอง', 'ราชบุรี',
+            'ลพบุรี', 'ลำปาง', 'ลำพูน', 'เลย', 'ศรีสะเกษ', 'สกลนคร', 'สงขลา', 'สตูล', 'สมุทรปราการ',
+            'สมุทรสงคราม', 'สมุทรสาคร', 'สระแก้ว', 'สระบุรี', 'สิงห์บุรี', 'สุโขทัย', 'สุพรรณบุรี',
+            'สุราษฎร์ธานี', 'สุรินทร์', 'หนองคาย', 'หนองบัวลำภู', 'อ่างทอง', 'อำนาจเจริญ', 'อุดรธานี',
+            'อุตรดิตถ์', 'อุทัยธานี', 'อุบลราชธานี'
         ];
 
         const useUserProfile = (currentUser) => {
@@ -219,7 +240,7 @@
                         await deleteDoc(itemLikeRef);
                         await deleteDoc(userLikeRef);
                     } else {
-                        const likeData = { 
+                        const likeData = {
                             likedAt: new Date().toISOString(),
                             userId: currentUser.uid,
                             itemId: itemId
@@ -298,18 +319,29 @@
                 return () => unsub();
             }, [itemId]);
 
-            const addComment = async (text, currentUser) => {
-                if (!currentUser || currentUser.isAnonymous) throw new Error('Not logged in');
+            const addComment = async (text) => {
+                // LAZY_AUTH_GATE
+                if (!auth.currentUser) {
+                    await signInAnonymously(auth);
+                }
+                const activeUser = auth.currentUser;
+
                 try {
                     await addDoc(collection(db, "items", itemId, "comments"), {
                         text,
-                        userId: currentUser.uid,
-                        userDisplayName: currentUser.displayName || 'ผู้ใช้',
-                        userPhotoURL: currentUser.photoURL || null,
+                        userId: activeUser.uid,
+                        userDisplayName: activeUser.displayName || (activeUser.isAnonymous ? 'ผู้เยี่ยมชม' : 'ผู้ใช้'),
+                        userPhotoURL: activeUser.photoURL || null,
                         createdAt: new Date().toISOString(),
                         deleted: false
                     });
                     await updateDoc(doc(db, "items", itemId), { comments: increment(1) });
+                    
+                    if (activeUser.isAnonymous) {
+                        setTopToastMessage({ title: 'บันทึกแล้ว! สมัครบัญชีเพื่อไม่ให้ข้อมูลหาย', isSuccess: false });
+                        setShowTopToast(true);
+                        setTimeout(() => setShowTopToast(false), 6000);
+                    }
                 } catch (e) {
                     console.error("Error adding comment:", e);
                     throw e;
@@ -392,7 +424,7 @@
                 }
                 setSubmitting(true);
                 try {
-                    await addComment(trimmed, currentUser);
+                    await addComment(trimmed);
                     setNewComment('');
                 } catch (e) {
                     alert('เกิดข้อผิดพลาดในการส่งความเห็น: ' + e.message);
@@ -491,8 +523,8 @@
 
             // Render the dropdown menu for a comment
             const renderOptionsMenu = (c) => (
-                <div style={{position:'fixed', top:0, left:0, right:0, bottom:0, zIndex:9998}} onClick={(e) => { e.stopPropagation(); setOptionsCommentId(null); }}>
-                    <div style={{position:'absolute', zIndex:9999}} className="w-40 bg-white rounded-xl shadow-[0_4px_20px_rgba(0,0,0,0.18)] border border-gray-100 overflow-hidden py-1 animate-fade-in" ref={(el) => {
+                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9998 }} onClick={(e) => { e.stopPropagation(); setOptionsCommentId(null); }}>
+                    <div style={{ position: 'absolute', zIndex: 9999 }} className="w-40 bg-white rounded-xl shadow-[0_4px_20px_rgba(0,0,0,0.18)] border border-gray-100 overflow-hidden py-1 animate-fade-in" ref={(el) => {
                         if (!el) return;
                         const btn = document.querySelector(`[data-comment-opt="${c.id}"]`);
                         if (btn) {
@@ -517,12 +549,12 @@
             // Full comment modal rendered via portal
             const fullModal = showFullModal ? createPortal(
                 <div className="fixed inset-0 bg-black/60 z-[9990] flex items-end sm:items-center justify-center animate-fade-in" onClick={() => { setShowFullModal(false); setOptionsCommentId(null); }}>
-                    <div className="bg-white w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl flex flex-col animate-slide-up" style={{maxHeight:'85dvh', height:'85dvh'}} onClick={e => e.stopPropagation()}>
+                    <div className="bg-white w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl flex flex-col animate-slide-up" style={{ maxHeight: '85dvh', height: '85dvh' }} onClick={e => e.stopPropagation()}>
                         <div className="p-4 border-b border-gray-100 flex items-center justify-between shadow-sm shrink-0">
                             <h3 className="font-bold text-gray-800 flex items-center gap-2"><MessageSquare size={18} className="text-blue-500" /> ความคิดเห็น ({comments.length})</h3>
                             <button onClick={() => { setShowFullModal(false); setOptionsCommentId(null); }} className="w-8 h-8 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-500 rounded-full transition-colors"><X size={16} /></button>
                         </div>
-                        
+
                         <div ref={modalListRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50/50">
                             {comments.map(c => (
                                 <div key={c.id} className="flex items-start justify-between text-xs relative">
@@ -541,7 +573,7 @@
                             {comments.length === 0 && <div className="text-center py-8 text-xs text-gray-400 italic">ยังไม่มีความคิดเห็น มาร่วมเป็นคนแรกเลย!</div>}
                         </div>
 
-                        <div className="p-3 border-t border-gray-100 bg-white shrink-0" style={{paddingBottom:'max(12px, env(safe-area-inset-bottom))'}}>
+                        <div className="p-3 border-t border-gray-100 bg-white shrink-0" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}>
                             <form onSubmit={handleSubmit}>
                                 {renderCommentInput(true)}
                             </form>
@@ -607,7 +639,7 @@
                                     <h3 className="text-lg font-bold">รายงานความคิดเห็น</h3>
                                     <p className="text-orange-100 text-[11px] mt-1 line-clamp-1 italic">"{reportingComment.text}"</p>
                                 </div>
-                                
+
                                 <div className="p-5 space-y-4">
                                     <div>
                                         <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-2">เลือกเหตุผล</label>
@@ -626,7 +658,7 @@
                                             <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">รายละเอียดเพิ่มเติม</label>
                                             <span className={`text-[9px] font-bold ${reportDetail.length > 50 ? 'text-red-500' : 'text-gray-300'}`}>{reportDetail.length}/50</span>
                                         </div>
-                                        <textarea 
+                                        <textarea
                                             value={reportDetail}
                                             onChange={e => setReportDetail(e.target.value.slice(0, 50))}
                                             placeholder="บอกรายละเอียดเพิ่มเติมเพื่อให้เราตรวจสอบได้ง่ายขึ้น..."
@@ -705,8 +737,8 @@
             const formatMobile = (val) => {
                 const digits = val.replace(/\D/g, '').slice(0, 10);
                 if (digits.length <= 3) return digits;
-                if (digits.length <= 6) return digits.slice(0,3) + '-' + digits.slice(3);
-                return digits.slice(0,3) + '-' + digits.slice(3,6) + '-' + digits.slice(6);
+                if (digits.length <= 6) return digits.slice(0, 3) + '-' + digits.slice(3);
+                return digits.slice(0, 3) + '-' + digits.slice(3, 6) + '-' + digits.slice(6);
             };
 
             const validateMobile = (m) => {
@@ -974,9 +1006,12 @@
         };
 
         function App() {
+            const [appFont, setAppFont] = useState('sans');
+            const [showSettingsModal, setShowSettingsModal] = useState(false);
             const [currentView, setCurrentView] = useState('feed');
             const [showShippingInFeed, setShowShippingInFeed] = useState(false);
             const [showVolumeInFeed, setShowVolumeInFeed] = useState(false);
+            const [pdpaAccepted, setPdpaAccepted] = useState(() => localStorage.getItem('pdpa_consent') === 'true');
             const [profileTab, setProfileTab] = useState('posts');
             const [adminNews, setAdminNews] = useState([]); // ── NEW: admin news from Firebase
             const [viewedNewsIds, setViewedNewsIds] = useState([]); // ── NEW: track viewed news
@@ -987,6 +1022,10 @@
             const [feedLoaded, setFeedLoaded] = useState(false);
             const [feedLimit, setFeedLimit] = useState(10);
             const [searchQuery, setSearchQuery] = useState('');
+            const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+            const lastSearchTermRef = useRef('');
+            const searchResultCountRef = useRef(0);
+            const searchCache = useRef({});
             const [selectedProduct, setSelectedProduct] = useState(null);
             const [showAllVariants, setShowAllVariants] = useState(false);
             const [zoomedImage, setZoomedImage] = useState(null);
@@ -1038,9 +1077,88 @@
             const [isSubmittingPostReport, setIsSubmittingPostReport] = useState(false);
             const [toastMessage, setToastMessage] = useState(null);
 
+            // ── Lazy Auth & Top Toast state ──
+            const [showTopToast, setShowTopToast] = useState(false);
+            const [topToastMessage, setTopToastMessage] = useState({ title: '', isSuccess: false });
+
             // Profile state
             const [showProfileModal, setShowProfileModal] = useState(false);
             const [profileForceOpen, setProfileForceOpen] = useState(false);
+
+            // ── Tip-off (ฝากบอกต่อ) state ──
+            const [showTipoffModal, setShowTipoffModal] = useState(false);
+            const [tipoffImages, setTipoffImages] = useState([]); // [{file, preview}]
+            const [tipoffItemName, setTipoffItemName] = useState('');
+            const [tipoffStore, setTipoffStore] = useState('');
+            const [tipoffPrice, setTipoffPrice] = useState('');
+            const [isSubmittingTipoff, setIsSubmittingTipoff] = useState(false);
+            const [myTipoffs, setMyTipoffs] = useState([]);
+            const [tipoffRefImages, setTipoffRefImages] = useState([]); // reference images for pre-fill
+            const [selectedTipoffView, setSelectedTipoffView] = useState(null);
+
+            const compressImage = (file, maxDim = 800) => new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        let w = img.width, h = img.height;
+                        if (w > maxDim || h > maxDim) {
+                            if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
+                            else { w = Math.round(w * maxDim / h); h = maxDim; }
+                        }
+                        canvas.width = w; canvas.height = h;
+                        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                        canvas.toBlob(resolve, 'image/jpeg', 0.8);
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+
+            const handleSubmitTipoff = async () => {
+                // LAZY_AUTH_GATE
+                if (!auth.currentUser) {
+                    await signInAnonymously(auth);
+                }
+                const activeUser = auth.currentUser;
+
+                if (tipoffImages.length === 0) { alert('กรุณาถ่ายหรือเลือกรูปอย่างน้อย 1 รูป'); return; }
+                setIsSubmittingTipoff(true);
+                try {
+                    const autoId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+                    const imageUrls = [];
+                    for (let i = 0; i < tipoffImages.length; i++) {
+                        const compressed = await compressImage(tipoffImages[i].file);
+                        const fileRef = storageRef(storage, `tipoffs/${activeUser.uid}/${autoId}/img_${i}.jpg`);
+                        await uploadBytes(fileRef, compressed);
+                        const url = await getDownloadURL(fileRef);
+                        imageUrls.push(url);
+                    }
+                    await addDoc(collection(db, "tipoffs"), {
+                        userId: activeUser.uid,
+                        userDisplayName: activeUser.displayName || (activeUser.isAnonymous ? 'ผู้เยี่ยมชม' : 'ผู้ใช้'),
+                        imageUrls,
+                        itemName: tipoffItemName.trim(),
+                        store: tipoffStore.trim(),
+                        price: parseFloat(tipoffPrice) || 0,
+                        status: 'pending',
+                        createdAt: Date.now(),
+                        adminNote: ''
+                    });
+                    setTipoffImages([]); setTipoffItemName(''); setTipoffStore(''); setTipoffPrice('');
+                    setShowTipoffModal(false);
+                    
+                    if (activeUser.isAnonymous) {
+                        setTopToastMessage({ title: 'บันทึกแล้ว! สมัครบัญชีเพื่อไม่ให้ข้อมูลหาย', isSuccess: false });
+                        setShowTopToast(true);
+                        setTimeout(() => setShowTopToast(false), 6000);
+                    } else {
+                        setToastMessage('ส่งแล้ว! Admin จะช่วยลงข้อมูลให้เร็วๆ นี้ 🙏');
+                    }
+                } catch (e) { alert('เกิดข้อผิดพลาด: ' + e.message); }
+                setIsSubmittingTipoff(false);
+            };
 
             // Fetch liked items
             const { likedItemIds, loadingLikes } = useUserLikes(currentUser);
@@ -1075,6 +1193,30 @@
                     }
                 };
             }, [feedLoaded]);
+
+            // Debounce search query (500ms) + log after debounce resolves
+            useEffect(() => {
+                const q = searchQuery.trim().toLowerCase();
+                if (q.length < 2) { setDebouncedSearchQuery(''); return; }
+                const timer = setTimeout(() => {
+                    setDebouncedSearchQuery(q);
+                    lastSearchTermRef.current = q;
+                }, 500);
+                return () => clearTimeout(timer);
+            }, [searchQuery]);
+
+            // ANALYTICS_GATE — log AFTER debounce resolves (not on keystrokes)
+            useEffect(() => {
+                if (!debouncedSearchQuery || debouncedSearchQuery.length < 2) return;
+                addDoc(collection(db, "searchLogs"), {
+                    query: debouncedSearchQuery,
+                    userId: auth.currentUser?.uid || "guest",
+                    isAnonymous: auth.currentUser?.isAnonymous ?? true,
+                    timestamp: Date.now(),
+                    resultCount: searchResultCountRef.current,
+                    hasResults: searchResultCountRef.current > 0
+                }).catch(() => {});
+            }, [debouncedSearchQuery]);
 
             useEffect(() => {
                 const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
@@ -1280,7 +1422,7 @@
                             const numPrice = parseFloat(data.price) || 0;
                             const numCashback = data.cashbackUsed ? (parseFloat(data.cashbackAmount) || 0) : 0;
                             const totalPrice = Math.max(0, numPrice - numCashback);
-                            
+
                             const unitQty = parseInt(data.unitQuantity) || 1;
                             const subUnit = data.subUnit || data.unitType || 'ชิ้น';
                             const subMode = data.subUnitMode || 'one';
@@ -1311,7 +1453,7 @@
                             const ppuWithShipping = itemsCount > 0 ? ((totalPrice + shipFee) / itemsCount) : null;
                             const ppuVolume = totalVolume > 0 ? (totalPrice / totalVolume) * 100 : null;
                             const ppuVolumeWithShipping = totalVolume > 0 ? ((totalPrice + shipFee) / totalVolume) * 100 : null;
-                            
+
                             return {
                                 id: doc.id, name: data.name, brand: data.brand || "",
                                 price: data.price, ppu, ppuVolume, ppuWithShipping, ppuVolumeWithShipping, totalPrice,
@@ -1419,6 +1561,25 @@
                 return () => newsUnsub();
             }, [viewedNewsIds]);
 
+            // ── Fetch user's tipoffs ──
+            useEffect(() => {
+                if (!currentUser) { setMyTipoffs([]); return; }
+                const tipoffQ = query(collection(db, "tipoffs"), where("userId", "==", currentUser.uid), orderBy("createdAt", "desc"));
+                const tipoffUnsub = onSnapshot(tipoffQ, (snapshot) => {
+                    setMyTipoffs(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+                }, (error) => {
+                    console.error("Tipoff query error:", error);
+                    // Fallback: try without orderBy (no composite index needed)
+                    const fallbackQ = query(collection(db, "tipoffs"), where("userId", "==", currentUser.uid));
+                    onSnapshot(fallbackQ, (snap) => {
+                        const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                        items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                        setMyTipoffs(items);
+                    });
+                });
+                return () => tipoffUnsub();
+            }, [currentUser]);
+
             // Add Deal Form State
             const [hideFuzzySearch, setHideFuzzySearch] = useState(false);
             const [itemName, setItemName] = useState('');
@@ -1502,6 +1663,12 @@
             };
 
             const handleSubmitReport = async () => {
+                // LAZY_AUTH_GATE
+                if (!auth.currentUser) {
+                    await signInAnonymously(auth);
+                }
+                const activeUser = auth.currentUser;
+
                 if (!reportText.trim() && reportImages.length === 0) {
                     alert('กรุณากรอกข้อความหรือแนบรูปภาพรายงานปัญหา');
                     return;
@@ -1510,14 +1677,22 @@
                 try {
                     await addDoc(collection(db, "reports"), {
                         text: reportText.trim(), images: reportImages,
-                        userId: currentUser?.uid || 'guest', userDisplayName: userDisplayName,
+                        userId: activeUser.uid, 
+                        userDisplayName: activeUser.displayName || (activeUser.isAnonymous ? 'ผู้เยี่ยมชม' : 'ผู้ใช้'),
                         createdAt: Date.now(), status: 'pending',
                         itemId: selectedProduct?.id || null,
                         itemUnitQty: selectedProduct?.unitQuantity || 1,
                         itemUnitType: selectedProduct?.unitType || 'ชิ้น'
                     });
-                    setToastMessage('ส่งรายงานปัญหาเรียบร้อยแล้ว ขอบคุณสำหรับข้อมูลครับ');
                     setShowReportModal(false); setReportText(''); setReportImages([]);
+                    
+                    if (activeUser.isAnonymous) {
+                        setTopToastMessage({ title: 'บันทึกแล้ว! สมัครบัญชีเพื่อไม่ให้ข้อมูลหาย', isSuccess: false });
+                        setShowTopToast(true);
+                        setTimeout(() => setShowTopToast(false), 6000);
+                    } else {
+                        setToastMessage('ส่งรายงานปัญหาเรียบร้อยแล้ว ขอบคุณสำหรับข้อมูลครับ');
+                    }
                 } catch (error) {
                     alert('เกิดข้อผิดพลาดในการส่งรายงาน กรุณาลองใหม่อีกครั้ง');
                 } finally {
@@ -1529,8 +1704,8 @@
             const numCashback = useCashback ? (parseFloat(cashbackAmount) || 0) : 0;
             const addedShipping = (shippingType === 'excluded' && includeShippingInPpu) ? (parseFloat(shippingFee) || 0) : 0;
             const totalPrice = Math.max(0, numPrice - numCashback + addedShipping);
-            const VOLUME_UNITS = ['ml','cc','L','ลิตร'];
-            const WEIGHT_UNITS = ['g','กรัม','kg','กิโลกรัม'];
+            const VOLUME_UNITS = ['ml', 'cc', 'L', 'ลิตร'];
+            const WEIGHT_UNITS = ['g', 'กรัม', 'kg', 'กิโลกรัม'];
 
             const totalVolume = (() => {
                 if (subUnitMode === 'one') {
@@ -1575,8 +1750,14 @@
             };
 
             const executeSaveDeal = async () => {
+                // LAZY_AUTH_GATE
+                if (!auth.currentUser) {
+                    await signInAnonymously(auth);
+                }
+                const activeUser = auth.currentUser;
+
                 try {
-                    await addDoc(collection(db, "items"), {
+                    const docRef = await addDoc(collection(db, "items"), {
                         name: itemName, brand, store: resolveStoreName(store),
                         price: parseFloat(price), shippingType,
                         shippingFee: shippingType === 'excluded' ? (parseFloat(shippingFee) || 0) : 0,
@@ -1599,18 +1780,36 @@
                         cashbackAmount: useCashback ? (parseFloat(cashbackAmount) || 0) : 0,
                         isMemberPrice,
                         image: imageBase64 || '', lastUpdated: Date.now(),
-                        userId: currentUser?.uid || 'guest',
-                        userDisplayName: userDisplayName,
-                        userPhotoURL: userPhotoURL,
+                        userId: activeUser.uid,
+                        userDisplayName: activeUser.displayName || (activeUser.isAnonymous ? 'ผู้เยี่ยมชม' : 'ผู้ใช้'),
+                        userPhotoURL: activeUser.photoURL || null,
                         productUrl: productUrl || ''
                     });
+
+                    // Add to priceHistory subcollection
+                    await addDoc(collection(db, "items", docRef.id, "priceHistory"), {
+                        price: parseFloat(price),
+                        store: resolveStoreName(store),
+                        userId: currentUser?.uid || 'guest',
+                        timestamp: Date.now()
+                    });
+
                     setItemName(''); setBrand(''); setPrice(''); setUnit(1); setUnitDisplay('1'); setStore('');
                     setSubUnit('ชิ้น'); setSubUnitCount(1); setSubUnitSize(''); setSubUnitSizeType('ml'); setSubUnitMode(null); setSubUnitCategory(null); setSubUnitEqual(null); setSubUnitSizes([]);
                     setUseCashback(false); setCashbackAmount(''); setUsePromo(false); setPromoCode('');
                     setIsMemberPrice(false); setProductUrl('');
                     setImageBase64(null); setTags([]); setTagInput(''); setShippingType('included');
                     setShippingFee(''); setIncludeShippingInPpu(false);
+                    setTipoffRefImages([]); // Clear prefill reference images
                     setShowConfirmModal(false); setCurrentView('feed');
+
+                    if (activeUser.isAnonymous) {
+                        setTopToastMessage({ title: 'บันทึกแล้ว! สมัครบัญชีเพื่อไม่ให้ข้อมูลหาย', isSuccess: false });
+                        setShowTopToast(true);
+                        setTimeout(() => setShowTopToast(false), 6000);
+                    } else {
+                        setToastMessage('บันทึกข้อมูลเรียบร้อยแล้ว');
+                    }
                 } catch (e) { alert("Error saving: " + e.message); }
             };
 
@@ -1687,9 +1886,21 @@
                         .filter(Boolean);
                     const withImages = allVariantDeals.filter(d => d.masterImage);
                     const pool = withImages.length >= 2 ? withImages : allVariantDeals;
-                    // Shuffle and pick 2
-                    const shuffled = [...pool].sort(() => 0.5 - Math.random());
-                    const display2 = shuffled.slice(0, 2);
+                    // Sort and pick 2 worthest
+                    const sorted = [...pool].sort((a, b) => {
+                        let valA = a.lowestPpu || Infinity;
+                        let valB = b.lowestPpu || Infinity;
+                        if (showVolumeInFeed) {
+                            if (a.lowestPpuVolume) valA = a.lowestPpuVolume;
+                            if (b.lowestPpuVolume) valB = b.lowestPpuVolume;
+                        }
+                        if (showShippingInFeed) {
+                            valA = (showVolumeInFeed && a.lowestPpuVolumeWithShipping) ? a.lowestPpuVolumeWithShipping : (a.lowestPpuWithShipping || valA);
+                            valB = (showVolumeInFeed && b.lowestPpuVolumeWithShipping) ? b.lowestPpuVolumeWithShipping : (b.lowestPpuWithShipping || valB);
+                        }
+                        return valA - valB;
+                    });
+                    const display2 = sorted.slice(0, 2);
                     // Find cheapest price across all variants
                     const cheapestPrice = Math.min(...allVariantDeals.map(d => d.lowestPpu || Infinity));
                     const cheapestDeal = allVariantDeals.find(d => d.lowestPpu === cheapestPrice) || deal;
@@ -1751,7 +1962,19 @@
                 const cardClass = `rounded-lg shadow-sm overflow-hidden flex flex-col hover:shadow-md transition-shadow cursor-pointer bg-white border border-gray-200`;
                 return (
                     <div key={deal.id}
-                        onClick={() => { setSelectedProduct(deal); setShowAllVariants(false); setIsDescriptionExpanded(false); setCurrentView('product_detail'); }}
+                        onClick={() => {
+                            // ANALYTICS_GATE — log search click (fire-and-forget)
+                            if (lastSearchTermRef.current && currentView === 'search') {
+                                addDoc(collection(db, "searchClickLogs"), {
+                                    query: lastSearchTermRef.current,
+                                    itemId: deal.id,
+                                    itemName: deal.name,
+                                    userId: auth.currentUser?.uid || "guest",
+                                    timestamp: Date.now()
+                                }).catch(() => {});
+                            }
+                            setSelectedProduct(deal); setShowAllVariants(false); setIsDescriptionExpanded(false); setCurrentView('product_detail');
+                        }}
                         className={cardClass}>
                         <div className="relative aspect-square bg-gray-200 flex-shrink-0">
                             {deal.masterImage ? <img src={deal.masterImage} alt={deal.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
@@ -1812,186 +2035,276 @@
             const renderProfile = () => {
                 const profileIncomplete = isLoggedIn && !isGuestUser && (!profile?.nickname || !profile?.firstName || !profile?.lastName || !profile?.mobile || !profile?.province);
                 return (
-                <div className="flex-1 overflow-y-auto bg-gray-50 pb-24 animate-fade-in">
-                    <div className="bg-white p-6 border-b border-gray-100 flex flex-col items-center">
-                        <div className="relative">
-                            {userPhotoURL ? (
-                                <img src={userPhotoURL} alt={userDisplayName} className="w-24 h-24 rounded-full mb-3 border-4 border-white shadow-lg" />
-                            ) : (
-                                <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center text-gray-300 text-4xl mb-3 border-4 border-white outline outline-gray-100">
-                                    <User size={40} />
-                                </div>
-                            )}
-                            {isLoggedIn && !isGuestUser && (
-                                <button onClick={() => setShowProfileModal(true)} className="absolute -bottom-1 -right-1 w-8 h-8 bg-green-500 text-white rounded-full flex items-center justify-center shadow-md hover:bg-green-600 transition-colors">
-                                    <Edit3 size={14} />
-                                </button>
-                            )}
-                        </div>
-                        <h2 className="text-xl font-bold text-gray-800">{userDisplayName}</h2>
-                        {currentUser?.email && <p className="text-sm text-gray-500 mt-1">{currentUser.email}</p>}
-                        {profileIncomplete && (
-                            <button onClick={() => setShowProfileModal(true)} className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-orange-50 text-orange-600 text-xs font-bold rounded-full border border-orange-200 hover:bg-orange-100 transition-colors">
-                                <AlertCircle size={12} /> กรอกข้อมูลยังไม่ครบ →
-                            </button>
-                        )}
-                        {isGuestUser && (
-                            <div className="mt-3 flex flex-col gap-2 w-full max-w-xs">
-                                <button onClick={handleGoogleLogin} className="w-full px-6 py-2.5 bg-white border-2 border-gray-200 hover:bg-gray-50 text-gray-700 text-sm font-bold rounded-full transition-colors flex items-center justify-center gap-2">
-                                    <svg className="w-5 h-5" viewBox="0 0 24 24">
-                                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-                                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-                                    </svg>
-                                    อัพเกรดด้วย Google
-                                </button>
-                                <p className="text-xs text-gray-400 text-center">เพื่อบันทึกข้อมูลและใช้งานได้ทุกอุปกรณ์</p>
-                            </div>
-                        )}
-                        {!isLoggedIn && (
-                            <button onClick={() => setShowLoginModal(true)} className="mt-3 px-6 py-2 bg-green-500 hover:bg-green-600 text-white text-sm font-bold rounded-full transition-colors">เข้าสู่ระบบ / สมัครสมาชิก</button>
-                        )}
-                        {isLoggedIn && !isGuestUser && (
-                            <button onClick={handleLogout} className="mt-3 px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm font-bold rounded-full transition-colors">ออกจากระบบ</button>
-                        )}
-                        {isLoggedIn && isGuestUser && (
-                            <button onClick={handleLogout} className="mt-2 px-4 py-1.5 text-red-400 hover:text-red-600 text-xs font-medium transition-colors">ออกจากระบบ Guest</button>
-                        )}
-                        <button onClick={() => setShowReportModal(true)} className="mt-4 flex items-center gap-2 px-4 py-2 bg-orange-50 hover:bg-orange-100 text-orange-600 text-sm font-bold rounded-full transition-colors border border-orange-200">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                            รายงานปัญหา / ข้อเสนอแนะ
-                        </button>
-                        <div className="flex gap-6 mt-6 w-full justify-center opacity-50">
-                            <div className="text-center"><div className="text-2xl font-bold text-gray-800">0</div><div className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">บอกต่อ</div></div>
-                            <div className="w-px bg-gray-200"></div>
-                            <div className="text-center"><div className="text-2xl font-bold text-gray-800">0</div><div className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">ถูกใจรวม</div></div>
-                        </div>
-                    </div>
-
-                    {(() => {
-                        const myPosts = deals.filter(d => d.userId === currentUser?.uid);
-                        return (
-                            <>
-                                <div className="flex bg-white border-b border-gray-100 sticky top-0 z-10 gap-1">
-                                    <button onClick={() => setProfileTab('posts')} className={`flex-[0.45] py-4 text-sm font-bold transition-colors border-b-2 ${profileTab === 'posts' ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-400 hover:bg-gray-50'}`}>โพสต์บอกต่อ ({myPosts.length})</button>
-                                    <button onClick={() => setProfileTab('likes')} className={`flex-[0.45] py-4 text-sm font-bold transition-colors border-b-2 ${profileTab === 'likes' ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-400 hover:bg-gray-50'}`}>ที่ถูกใจ ({likedItemIds.length})</button>
-                                    <button onClick={() => setProfileTab('news')} className={`flex-[0.1] py-4 text-sm font-bold transition-colors border-b-2 flex items-center justify-center relative group ${profileTab === 'news' ? 'border-red-500 text-red-500' : 'border-transparent text-red-400 hover:bg-red-50'}`}>
-                                        <Bell size={18} className="group-hover:scale-110 transition-transform" />
-                                        {unreadAdminNewsCount > 0 && <span className="absolute top-1 right-1 bg-red-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-tight">{unreadAdminNewsCount > 99 ? '99+' : unreadAdminNewsCount}</span>}
+                    <div className="flex-1 overflow-y-auto bg-gray-50 pb-24 animate-fade-in">
+                        <div className="bg-white p-6 border-b border-gray-100 flex flex-col items-center">
+                            <div className="relative">
+                                {userPhotoURL ? (
+                                    <img src={userPhotoURL} alt={userDisplayName} className="w-24 h-24 rounded-full mb-3 border-4 border-white shadow-lg" />
+                                ) : (
+                                    <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center text-gray-300 text-4xl mb-3 border-4 border-white outline outline-gray-100">
+                                        <User size={40} />
+                                    </div>
+                                )}
+                                {isLoggedIn && !isGuestUser && (
+                                    <button onClick={() => setShowProfileModal(true)} className="absolute -bottom-1 -right-1 w-8 h-8 bg-green-500 text-white rounded-full flex items-center justify-center shadow-md hover:bg-green-600 transition-colors">
+                                        <Edit3 size={14} />
                                     </button>
+                                )}
+                            </div>
+                            <h2 className="text-xl font-bold text-gray-800">{userDisplayName}</h2>
+                            {currentUser?.email && <p className="text-sm text-gray-500 mt-1">{currentUser.email}</p>}
+                            {profileIncomplete && (
+                                <button onClick={() => setShowProfileModal(true)} className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-orange-50 text-orange-600 text-xs font-bold rounded-full border border-orange-200 hover:bg-orange-100 transition-colors">
+                                    <AlertCircle size={12} /> กรอกข้อมูลยังไม่ครบ →
+                                </button>
+                            )}
+                            {isGuestUser && (
+                                <div className="mt-3 flex flex-col gap-2 w-full max-w-xs">
+                                    <button onClick={handleGoogleLogin} className="w-full px-6 py-2.5 bg-white border-2 border-gray-200 hover:bg-gray-50 text-gray-700 text-sm font-bold rounded-full transition-colors flex items-center justify-center gap-2">
+                                        <svg className="w-5 h-5" viewBox="0 0 24 24">
+                                            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                                            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                                            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                                            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                                        </svg>
+                                        อัพเกรดด้วย Google
+                                    </button>
+                                    <p className="text-xs text-gray-400 text-center">เพื่อบันทึกข้อมูลและใช้งานได้ทุกอุปกรณ์</p>
                                 </div>
+                            )}
+                            {!isLoggedIn && (
+                                <div className="mt-3 flex flex-col gap-2 w-full max-w-xs">
+                                    <button onClick={handleGoogleLogin} className="w-full px-6 py-2.5 bg-white border-2 border-gray-200 hover:bg-gray-50 text-gray-700 text-sm font-bold rounded-full transition-colors flex items-center justify-center gap-2">
+                                        <svg className="w-5 h-5" viewBox="0 0 24 24">
+                                            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                                            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                                            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                                            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                                        </svg>
+                                        เข้าสู่ระบบด้วย Google
+                                    </button>
+                                    <p className="text-xs text-gray-400 text-center">เพื่อบันทึกข้อมูลและใช้งานได้ทุกอุปกรณ์</p>
+                                </div>
+                            )}
+                            <div className="flex gap-6 mt-6 w-full justify-center opacity-50">
+                                <div className="text-center"><div className="text-2xl font-bold text-gray-800">0</div><div className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">บอกต่อ</div></div>
+                                <div className="w-px bg-gray-200"></div>
+                                <div className="text-center"><div className="text-2xl font-bold text-gray-800">0</div><div className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">ถูกใจรวม</div></div>
+                            </div>
+                        </div>
 
-                                <div className="p-4 space-y-3">
-                                    {profileTab === 'posts' && (
-                                        myPosts.length > 0 ? (
-                                            myPosts.map((deal, idx) => (
-                                                <div key={deal.id + idx} className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex gap-3 relative overflow-hidden">
-                                                    <div className="w-24 h-24 rounded-xl bg-gray-100 flex-shrink-0 overflow-hidden">
-                                                        {deal.image ? <img src={deal.image} alt={deal.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
-                                                    </div>
-                                                    <div className="flex-1 flex flex-col justify-between py-1">
-                                                        <div>
-                                                            <h4 className="font-bold text-gray-800 text-sm leading-tight line-clamp-2">{deal.name}</h4>
-                                                            <div className="text-xs text-gray-500 mt-1 flex items-center gap-1"><MapPin size={10} /> {deal.shop}</div>
-                                                        </div>
-                                                        <div className="flex justify-between items-end">
-                                                            <div className="text-lg font-bold text-red-500">฿{deal.price}</div>
-                                                            <div className="flex items-center gap-3 text-xs text-gray-400">
-                                                                <span className="flex items-center gap-1"><Heart size={14} /> {deal.likes}</span>
-                                                                <span className="flex items-center gap-1"><MessageSquare size={14} /> {commentCounts[deal.id] ?? deal.comments ?? 0}</span>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ))
-                                        ) : (
-                                            <div className="text-center py-16 flex flex-col items-center">
-                                                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4"><FileText size={28} className="text-gray-300" /></div>
-                                                <div className="text-gray-500 font-bold text-sm">ยังไม่มีโพสต์บอกต่อ</div>
-                                                <div className="text-gray-400 text-xs mt-1">เริ่มแชร์ดีลเด็ดที่คุณเจอให้คนอื่นรู้!</div>
-                                            </div>
-                                        )
-                                    )}
-                                    {profileTab === 'likes' && (
-                                        loadingLikes ? (
-                                            <div className="text-center py-10 text-gray-500 text-xs">กำลังโหลด...</div>
-                                        ) : likedItemIds.length > 0 ? (
-                                            deals.filter(d => likedItemIds.includes(d.id)).map((deal, idx) => (
-                                                <div key={deal.id + idx} className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex gap-3 relative overflow-hidden mb-3" onClick={() => { setSelectedProduct(deal); setShowAllVariants(false); setIsDescriptionExpanded(false); setCurrentView('product_detail'); }}>
-                                                    <div className="w-24 h-24 rounded-xl bg-gray-100 flex-shrink-0 overflow-hidden">
-                                                        {deal.image ? <img src={deal.image} alt={deal.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
-                                                    </div>
-                                                    <div className="flex-1 flex flex-col justify-between py-1">
-                                                        <div>
-                                                            <h4 className="font-bold text-gray-800 text-sm leading-tight line-clamp-2">{deal.name}</h4>
-                                                            <div className="text-xs text-gray-500 mt-1 flex items-center gap-1"><MapPin size={10} /> {deal.shop}</div>
-                                                        </div>
-                                                        <div className="flex justify-between items-end">
-                                                            <div className="text-lg font-bold text-red-500">฿{deal.price}</div>
-                                                            <div className="flex items-center gap-3 text-xs text-gray-400">
-                                                                <span className="flex items-center gap-1"><Heart size={14} className="text-red-500" fill="currentColor" /> {deal.likes}</span>
-                                                                <span className="flex items-center gap-1"><MessageSquare size={14} /> {commentCounts[deal.id] ?? deal.comments ?? 0}</span>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ))
-                                        ) : (
-                                            <div className="text-center py-16 flex flex-col items-center">
-                                                <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4"><Heart size={28} className="text-red-200" /></div>
-                                                <div className="text-gray-500 font-bold text-sm">ยังไม่มีรายการที่ถูกใจ</div>
-                                                <div className="text-gray-400 text-xs mt-1">เริ่มกดถูกใจดีลเด็ดๆ ที่คุณชอบ</div>
-                                            </div>
-                                        )
-                                    )}
-                                    {profileTab === 'news' && (
-                                        <div className="space-y-3">
-                                            <div className="flex items-center gap-2 text-blue-600 text-sm font-bold mb-4"><Bell size={16} /> ข่าวสารจากผู้ดูแลระบบ ({adminNews.length})</div>
-                                            {adminNews.length === 0 ? (
-                                                <div className="text-center text-gray-400 py-10 text-sm italic">ไม่มีข่าวสารใหม่</div>
-                                            ) : (
-                                                adminNews.map(news => {
-                                                    const isUnread = !viewedNewsIds.includes(news.id);
-                                                    return (
-                                                        <div
-                                                            key={news.id}
-                                                            onClick={() => {
-                                                                if (!viewedNewsIds.includes(news.id)) {
-                                                                    setViewedNewsIds(prev => [...prev, news.id]);
-                                                                }
-                                                            }}
-                                                            className={`rounded-2xl p-4 hover:shadow-md transition-all cursor-pointer group border-2 ${isUnread
-                                                                    ? 'bg-blue-50 border-blue-300 shadow-md'
-                                                                    : 'bg-gray-50 border-gray-200'
-                                                                }`}>
-                                                            <div className="flex items-start gap-3">
-                                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform ${isUnread ? 'bg-blue-500' : 'bg-gray-400'
-                                                                    }`}>
-                                                                    <Bell size={18} className="text-white" />
-                                                                </div>
-                                                                <div className="flex-1 min-w-0 pr-2">
-                                                                    <div className="flex items-start justify-between gap-2">
-                                                                        <h4 className={`font-bold text-sm leading-tight ${isUnread ? 'text-blue-900' : 'text-gray-700'
-                                                                            }`}>{news.text}</h4>
-                                                                        {isUnread && <span className="text-[10px] bg-blue-500 text-white px-2 py-0.5 rounded-full font-bold flex-shrink-0">ใหม่</span>}
-                                                                    </div>
-                                                                    <div className={`text-[11px] mt-2 flex items-center gap-1 ${isUnread ? 'text-blue-600' : 'text-gray-500'
-                                                                        }`}><Clock size={10} /> {new Date(news.createdAt).toLocaleString('th-TH')}</div>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })
-                                            )}
+                        {(() => {
+                            const myPosts = deals
+                                .filter(d => d.userId === currentUser?.uid)
+                                .sort((a, b) => (b.lastUpdated || 0) - (a.lastUpdated || 0));
+                            return (
+                                <>
+                                    {isGuestUser && (
+                                        <div className="bg-yellow-50 px-4 py-3 border-b border-yellow-200 text-center">
+                                            <p className="text-xs text-yellow-800 font-bold mb-2">⚠️ คุณใช้งานแบบไม่มีบัญชี ข้อมูลที่กรอกไปอาจหายถ้าเปลี่ยนอุปกรณ์</p>
+                                            <button onClick={async () => {
+                                                try {
+                                                    await linkWithPopup(auth.currentUser, googleProvider);
+                                                    setTopToastMessage({ title: 'เชื่อมบัญชีแล้ว', isSuccess: true });
+                                                    setShowTopToast(true);
+                                                    setTimeout(() => setShowTopToast(false), 2000);
+                                                } catch (e) { alert('เชื่อมบัญชีไม่สำเร็จ: ' + e.message); }
+                                            }} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 rounded-xl text-xs transition-colors shadow-sm">ผูกบัญชี Google เพื่อความปลอดภัย</button>
                                         </div>
                                     )}
-                                </div>
-                            </>
-                        );
-                    })()}
-                </div>
-            );
+                                    <div className="flex bg-white border-b border-gray-100 sticky top-0 z-10 gap-1">
+                                        <button onClick={() => setProfileTab('posts')} className={`flex-[0.3] py-4 text-sm font-bold transition-colors border-b-2 ${profileTab === 'posts' ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-400 hover:bg-gray-50'}`}>โพสต์ ({myPosts.length})</button>
+                                        <button onClick={() => setProfileTab('likes')} className={`flex-[0.25] py-4 text-sm font-bold transition-colors border-b-2 ${profileTab === 'likes' ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-400 hover:bg-gray-50'}`}>ถูกใจ ({likedItemIds.length})</button>
+                                        <button onClick={() => setProfileTab('tipoffs')} className={`flex-[0.3] py-4 text-sm font-bold transition-colors border-b-2 flex items-center justify-center gap-1 ${profileTab === 'tipoffs' ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-400 hover:bg-gray-50'}`}>
+                                            <Camera size={14} /> ฝากบอกต่อ {myTipoffs.length > 0 && <span className="text-[9px] bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded-full font-bold">{myTipoffs.length}</span>}
+                                        </button>
+                                        <button onClick={() => setProfileTab('news')} className={`flex-[0.15] py-4 text-sm font-bold transition-colors border-b-2 flex items-center justify-center relative group ${profileTab === 'news' ? 'border-red-500 text-red-500' : 'border-transparent text-red-400 hover:bg-red-50'}`}>
+                                            <Bell size={18} className="group-hover:scale-110 transition-transform" />
+                                            {unreadAdminNewsCount > 0 && <span className="absolute top-1 right-1 bg-red-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-tight">{unreadAdminNewsCount > 99 ? '99+' : unreadAdminNewsCount}</span>}
+                                        </button>
+                                    </div>
+
+                                    <div className="p-4 space-y-3">
+                                        {profileTab === 'posts' && (
+                                            myPosts.length > 0 ? (
+                                                <div className="grid grid-cols-3 gap-2">
+                                                    {myPosts.map((deal, idx) => (
+                                                        <div key={deal.id + idx}
+                                                            onClick={() => { setSelectedProduct(deal); setShowAllVariants(false); setIsDescriptionExpanded(false); setCurrentView('product_detail'); }}
+                                                            className="bg-white rounded-xl overflow-hidden border border-gray-100 shadow-sm active:scale-95 transition-transform flex flex-col cursor-pointer">
+                                                            <div className="aspect-square bg-gray-50 flex-shrink-0 relative overflow-hidden">
+                                                                {deal.image ? <img src={deal.image} alt={deal.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
+                                                            </div>
+                                                            <div className="p-2 flex flex-col flex-1">
+                                                                <h4 className="text-[10px] font-bold text-gray-800 line-clamp-2 leading-tight mb-1 font-inter">{deal.name}</h4>
+                                                                <div className="mt-auto flex items-center justify-between gap-1 overflow-hidden">
+                                                                    <div className="text-[10px] font-bold text-red-500 shrink-0">฿{deal.price}</div>
+                                                                    <div className="text-[8px] text-gray-400 truncate flex items-center gap-0.5 font-medium">
+                                                                        <Store size={8} className="shrink-0" /> <span className="truncate">{deal.shop}</span>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <div className="text-center py-16 flex flex-col items-center">
+                                                    <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4"><FileText size={28} className="text-gray-300" /></div>
+                                                    <div className="text-gray-500 font-bold text-sm">ยังไม่มีโพสต์บอกต่อ</div>
+                                                    <div className="text-gray-400 text-xs mt-1">เริ่มแชร์ดีลเด็ดที่คุณเจอให้คนอื่นรู้!</div>
+                                                </div>
+                                            )
+                                        )}
+                                        {profileTab === 'likes' && (
+                                            loadingLikes ? (
+                                                <div className="text-center py-10 text-gray-500 text-xs">กำลังโหลด...</div>
+                                            ) : likedItemIds.length > 0 ? (
+                                                <div className="grid grid-cols-3 gap-2">
+                                                    {likedItemIds.map(id => deals.find(d => d.id === id)).filter(Boolean).map((deal, idx) => (
+                                                        <div key={deal.id + idx}
+                                                            onClick={() => { setSelectedProduct(deal); setShowAllVariants(false); setIsDescriptionExpanded(false); setCurrentView('product_detail'); }}
+                                                            className="bg-white rounded-xl overflow-hidden border border-gray-100 shadow-sm active:scale-95 transition-transform flex flex-col cursor-pointer">
+                                                            <div className="aspect-square bg-gray-50 flex-shrink-0 relative overflow-hidden">
+                                                                {deal.image ? <img src={deal.image} alt={deal.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
+                                                            </div>
+                                                            <div className="p-2 flex flex-col flex-1">
+                                                                <h4 className="text-[10px] font-bold text-gray-800 line-clamp-2 leading-tight mb-1 font-inter">{deal.name}</h4>
+                                                                <div className="mt-auto flex items-center justify-between gap-1 overflow-hidden">
+                                                                    <div className="text-[10px] font-bold text-red-500 shrink-0">฿{deal.price}</div>
+                                                                    <div className="text-[8px] text-gray-400 truncate flex items-center gap-0.5 font-medium">
+                                                                        <Store size={8} className="shrink-0" /> <span className="truncate">{deal.shop}</span>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <div className="text-center py-16 flex flex-col items-center">
+                                                    <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4"><Heart size={28} className="text-red-200" /></div>
+                                                    <div className="text-gray-500 font-bold text-sm">ยังไม่มีรายการที่ถูกใจ</div>
+                                                    <div className="text-gray-400 text-xs mt-1">เริ่มกดถูกใจดีลเด็ดๆ ที่คุณชอบ</div>
+                                                </div>
+                                            )
+                                        )}
+                                        {profileTab === 'news' && (
+                                            <div className="space-y-3">
+                                                <div className="flex items-center gap-2 text-blue-600 text-sm font-bold mb-4"><Bell size={16} /> ข่าวสารจากผู้ดูแลระบบ ({adminNews.length})</div>
+                                                {adminNews.length === 0 ? (
+                                                    <div className="text-center text-gray-400 py-10 text-sm italic">ไม่มีข่าวสารใหม่</div>
+                                                ) : (
+                                                    adminNews.map(news => {
+                                                        const isUnread = !viewedNewsIds.includes(news.id);
+                                                        return (
+                                                            <div
+                                                                key={news.id}
+                                                                onClick={() => {
+                                                                    if (!viewedNewsIds.includes(news.id)) {
+                                                                        setViewedNewsIds(prev => [...prev, news.id]);
+                                                                    }
+                                                                }}
+                                                                className={`rounded-2xl p-4 hover:shadow-md transition-all cursor-pointer group border-2 ${isUnread
+                                                                    ? 'bg-blue-50 border-blue-300 shadow-md'
+                                                                    : 'bg-gray-50 border-gray-200'
+                                                                    }`}>
+                                                                <div className="flex items-start gap-3">
+                                                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform ${isUnread ? 'bg-blue-500' : 'bg-gray-400'
+                                                                        }`}>
+                                                                        <Bell size={18} className="text-white" />
+                                                                    </div>
+                                                                    <div className="flex-1 min-w-0 pr-2">
+                                                                        <div className="flex items-start justify-between gap-2">
+                                                                            <h4 className={`font-bold text-sm leading-tight ${isUnread ? 'text-blue-900' : 'text-gray-700'
+                                                                                }`}>{news.text}</h4>
+                                                                            {isUnread && <span className="text-[10px] bg-blue-500 text-white px-2 py-0.5 rounded-full font-bold flex-shrink-0">ใหม่</span>}
+                                                                        </div>
+                                                                        <div className={`text-[11px] mt-2 flex items-center gap-1 ${isUnread ? 'text-blue-600' : 'text-gray-500'
+                                                                            }`}><Clock size={10} /> {new Date(news.createdAt).toLocaleString('th-TH')}</div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* ฝากบอกต่อ Tab */}
+                                        {profileTab === 'tipoffs' && (
+                                            <div className="space-y-3">
+                                                <div className="flex items-center gap-2 text-orange-600 text-sm font-bold mb-4"><Camera size={16} /> ฝากบอกต่อของฉัน ({myTipoffs.length})</div>
+                                                {myTipoffs.length === 0 ? (
+                                                    <div className="text-center py-12">
+                                                        <Camera size={40} className="mx-auto text-gray-200 mb-3" />
+                                                        <p className="text-sm text-gray-500 font-bold">ยังไม่มีรายการ</p>
+                                                        {!isLoggedIn ? (
+                                                            <div className="mt-4 px-6">
+                                                                <p className="text-xs text-gray-400 mb-3">เข้าสู่ระบบเพื่อส่งรูปฝากบอกต่อ</p>
+                                                                <button onClick={handleGoogleLogin} className="w-full px-4 py-2.5 bg-white border-2 border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-bold rounded-full transition-colors flex items-center justify-center gap-2">
+                                                                    <svg className="w-4 h-4" viewBox="0 0 24 24">
+                                                                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                                                                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                                                                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                                                                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                                                                    </svg>
+                                                                    เข้าสู่ระบบด้วย Google
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <p className="text-xs text-gray-400 mt-1">แตะปุ่มกล้องที่หน้า "เพิ่มดีล" เพื่อส่งรูป</p>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    myTipoffs.map(tip => {
+                                                        const statusMap = { pending: { Icon: Clock, label: 'รอ admin', color: 'bg-yellow-50 text-yellow-700 border-yellow-200' }, approved: { Icon: CheckCircle, label: 'บอกต่อแล้ว', color: 'bg-green-50 text-green-700 border-green-200' }, rejected: { Icon: XCircle, label: 'ไม่ผ่าน', color: 'bg-red-50 text-red-700 border-red-200' } };
+                                                        const st = statusMap[tip.status] || statusMap.pending;
+                                                        const StatusIcon = st.Icon;
+                                                        return (
+                                                            <div key={tip.id} onClick={() => setSelectedTipoffView(tip)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 hover:shadow-md transition-shadow cursor-pointer">
+                                                                <div className="flex gap-3">
+                                                                    <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0 border border-gray-200">
+                                                                        {tip.imageUrls?.[0] ? <img src={tip.imageUrls[0]} className="w-full h-full object-cover" /> : <Camera size={20} className="m-auto mt-5 text-gray-300" />}
+                                                                    </div>
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <h4 className="font-bold text-sm text-gray-800 line-clamp-1">{tip.itemName || 'ไม่ระบุชื่อ'}</h4>
+                                                                        {tip.store && <p className="text-[10px] text-gray-500 font-medium flex items-center gap-1 mt-0.5"><Store size={10} /> {tip.store}</p>}
+                                                                        {tip.price > 0 && <p className="text-[10px] text-blue-600 font-bold mt-0.5">฿{tip.price}</p>}
+                                                                        <div className="flex items-center gap-2 mt-1.5">
+                                                                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border flex flex-row items-center gap-1 ${st.color}`}><StatusIcon size={10} /> {st.label}</span>
+                                                                            <span className="text-[9px] text-gray-400">{new Date(tip.createdAt).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' })}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                {tip.adminNote && (
+                                                                    <div className={`mt-2 p-2.5 rounded-xl text-[11px] font-medium flex items-start gap-1.5 ${tip.status === 'rejected' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
+                                                                        <MessageSquare size={12} className="flex-shrink-0 mt-0.5" />
+                                                                        <div><span className="font-bold">Admin:</span> {tip.adminNote}</div>
+                                                                    </div>
+                                                                )}
+                                                                {tip.status === 'pending' && (
+                                                                    <button onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setTipoffRefImages(tip.imageUrls || []);
+                                                                        if (tip.itemName) setItemName(tip.itemName);
+                                                                        if (tip.store) setStore(tip.store);
+                                                                        if (tip.price > 0) setPrice(String(tip.price));
+                                                                        setCurrentView('add');
+                                                                    }} className="mt-2 w-full py-2 bg-green-50 text-green-600 text-xs font-bold rounded-xl border border-green-200 hover:bg-green-100 transition-colors flex items-center justify-center gap-1">
+                                                                        <Edit3 size={12} /> กรอกเอง
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                </>
+                            );
+                        })()}
+                    </div>
+                );
             };
             // ── FEED: shipping toggle only, no dummy category tabs ──
             const renderFeed = () => {
@@ -2025,7 +2338,7 @@
                                 className={`whitespace-nowrap px-4 py-1.5 rounded-full text-[11px] font-bold transition-colors shadow-sm flex items-center gap-1.5 border ${showVolumeInFeed
                                     ? 'bg-blue-500 text-white border-blue-600'
                                     : 'bg-white text-blue-500 border-blue-300 hover:bg-blue-50'}`}>
-                                {showVolumeInFeed ? 'แสดง ฿/100ml' : 'แสดง ฿/หน่วย'}
+                                แสดง ฿/หน่วย
                             </button>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
@@ -2057,7 +2370,7 @@
                         )}
 
                         {feedLoaded && !hasMore && feedItems.length > 10 && (
-                            <div className="text-center py-8 text-[10px] text-gray-400 font-medium italic">— คุณเลื่อนมาถึงจุดสิ้นสุดแล้ว ✨ —</div>
+                            <div className="text-center py-8 text-[10px] text-gray-400 font-medium italic">— คุณดูสินค้าทุกรายการแล้ว —</div>
                         )}
                     </div>
                 );
@@ -2065,25 +2378,33 @@
 
             // ── SEARCH: real category chips from Firestore, category badges on cards ──
             const renderSearch = () => {
-                // Build filtered results: text query + optional category filter
-                const searchResults = groupedDeals.filter(deal => {
-                    // Text match
-                    const q = searchQuery.toLowerCase();
-                    const textMatch = !q || (
-                        (deal.name && deal.name.toLowerCase().includes(q)) ||
-                        (deal.brand && deal.brand.toLowerCase().includes(q)) ||
-                        (deal.tags && deal.tags.some(t => t.toLowerCase().includes(q)))
-                    );
-                    // Category filter
-                    const catMatch = !activeCategoryFilter || (() => {
-                        const cat = categories.find(c => c.name === activeCategoryFilter);
-                        return cat ? (cat.items || []).includes(deal.name) : false;
-                    })();
-                    const brandMatch = !activeBrandFilter || (deal.brand && deal.brand === activeBrandFilter);
-                    return textMatch && catMatch && brandMatch;
-                });
+                // Build filtered results using debounced query + cache
+                const q = debouncedSearchQuery;
+                let searchResults;
+                const cacheKey = `${q}|${activeCategoryFilter || ''}|${activeBrandFilter || ''}`;
+                if (searchCache.current[cacheKey]) {
+                    searchResults = searchCache.current[cacheKey];
+                } else {
+                    searchResults = groupedDeals.filter(deal => {
+                        const textMatch = !q || (
+                            (deal.name && deal.name.toLowerCase().includes(q)) ||
+                            (deal.brand && deal.brand.toLowerCase().includes(q)) ||
+                            (deal.tags && deal.tags.some(t => t.toLowerCase().includes(q)))
+                        );
+                        const catMatch = !activeCategoryFilter || (() => {
+                            const cat = categories.find(c => c.name === activeCategoryFilter);
+                            return cat ? (cat.items || []).includes(deal.name) : false;
+                        })();
+                        const brandMatch = !activeBrandFilter || (deal.brand && deal.brand === activeBrandFilter);
+                        return textMatch && catMatch && brandMatch;
+                    });
+                    if (q) searchCache.current[cacheKey] = searchResults;
+                }
 
-                const isFiltering = searchQuery || activeCategoryFilter || activeBrandFilter;
+                searchResultCountRef.current = searchResults.length;
+
+                const isFiltering = debouncedSearchQuery || activeCategoryFilter || activeBrandFilter;
+                const isTypingShort = searchQuery.length > 0 && searchQuery.length < 2 && !activeCategoryFilter && !activeBrandFilter;
 
                 return (
                     <div className="flex-1 flex flex-col bg-gray-100 overflow-hidden animate-fade-in relative z-0 pb-20">
@@ -2167,7 +2488,17 @@
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-3">
-                            {isFiltering ? (
+                            {isTypingShort ? (
+                                <div className="text-center py-10 flex flex-col items-center">
+                                    <Search size={32} className="text-gray-300 mb-3" />
+                                    <div className="text-gray-400 text-sm font-medium">พิมพ์อย่างน้อย 2 ตัวอักษร</div>
+                                </div>
+                            ) : searchQuery.length >= 2 && !debouncedSearchQuery ? (
+                                <div className="text-center py-10 flex flex-col items-center">
+                                    <div className="w-6 h-6 border-2 border-orange-400 border-t-transparent rounded-full animate-spin mb-3"></div>
+                                    <div className="text-gray-400 text-xs font-medium">กำลังค้นหา...</div>
+                                </div>
+                            ) : isFiltering ? (
                                 <div>
                                     <h3 className="text-xs font-bold text-gray-500 mb-3 ml-1 uppercase tracking-wider flex items-center gap-2">
                                         พบ {searchResults.length} รายการ
@@ -2274,6 +2605,18 @@
 
             const renderAddDeal = () => (
                 <div className="flex-1 flex flex-col bg-white overflow-hidden animate-fade-in relative z-0 pb-20">
+                    {/* Reference images strip from tip-off pre-fill */}
+                    {tipoffRefImages.length > 0 && (
+                        <div className="bg-amber-50 border-b border-amber-200 p-3 flex items-center gap-2 flex-none">
+                            <span className="text-[10px] font-bold text-amber-600 whitespace-nowrap"><Camera size={12} className="inline mr-1" /> รูปอ้างอิงจากที่ฝากไว้</span>
+                            <div className="flex gap-2 overflow-x-auto hide-scrollbar">
+                                {tipoffRefImages.map((url, i) => (
+                                    <img key={i} src={url} className="w-12 h-12 rounded-lg object-cover border border-amber-300 flex-shrink-0 shadow-sm" onClick={() => setZoomedImage(url)} />
+                                ))}
+                            </div>
+                            <button onClick={() => setTipoffRefImages([])} className="ml-auto text-amber-400 hover:text-amber-600 flex-shrink-0"><X size={16} /></button>
+                        </div>
+                    )}
                     <div className="flex-none bg-green-50/50 border-b border-green-100 p-6 flex flex-col justify-end items-end min-h-[160px] relative transition-all shadow-inner">
                         <div className="absolute top-4 left-4 flex flex-col items-start z-10">
                             <div className="flex items-center gap-1.5 mb-2">
@@ -2283,11 +2626,11 @@
                                 {store && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-widest bg-gray-200/80 text-gray-500 truncate max-w-[80px]">{store}</span>}
                             </div>
                             {[
-                                { label: 'ชื่อ',  done: !!itemName },
-                                { label: 'ร้าน',  done: !!store },
+                                { label: 'ชื่อ', done: !!itemName },
+                                { label: 'ร้าน', done: !!store },
                                 { label: 'ราคา', done: !!price },
                                 { label: 'หน่วย', done: !!subUnitMode },
-                                { label: 'รูป',  done: !!imageBase64 },
+                                { label: 'รูป', done: !!imageBase64 },
                             ].map(({ label, done }) => (
                                 <div key={label} className="flex items-center gap-1.5 py-[1px]">
                                     <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 transition-colors duration-200 ${done ? 'bg-green-400' : 'bg-gray-300'}`} />
@@ -2493,14 +2836,13 @@
 
                                     {/* Quick subUnit suggestions */}
                                     <div className="flex flex-wrap gap-1.5 mb-4">
-                                        {['ชิ้น','ซอง','ขวด','ถุง','กล่อง','อัน','แพ็ค'].map(u => (
+                                        {['ชิ้น', 'ซอง', 'ขวด', 'ถุง', 'กล่อง', 'อัน', 'แพ็ค'].map(u => (
                                             <button key={u} type="button"
                                                 onClick={() => setSubUnit(u)}
-                                                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors ${
-                                                    subUnit === u
+                                                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors ${subUnit === u
                                                         ? 'bg-orange-500 text-white border-orange-500'
                                                         : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-orange-300'
-                                                }`}>
+                                                    }`}>
                                                 {u}
                                             </button>
                                         ))}
@@ -2510,20 +2852,18 @@
                                     <div className="grid grid-cols-2 gap-2">
                                         <button type="button"
                                             onClick={() => { setSubUnitMode('one'); setSubUnitCount(1); setSubUnitCategory(null); setSubUnitEqual(null); }}
-                                            className={`py-3 rounded-xl border-2 font-bold text-xs transition-all ${
-                                                subUnitMode === 'one'
+                                            className={`py-3 rounded-xl border-2 font-bold text-xs transition-all ${subUnitMode === 'one'
                                                     ? 'border-green-400 bg-green-50 text-green-600'
                                                     : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-green-200'
-                                            }`}>
+                                                }`}>
                                             1 {subUnit}
                                         </button>
                                         <button type="button"
                                             onClick={() => { setSubUnitMode('many'); setSubUnitCount(2); setSubUnitCategory(null); setSubUnitEqual(null); }}
-                                            className={`py-3 rounded-xl border-2 font-bold text-xs transition-all ${
-                                                subUnitMode === 'many'
+                                            className={`py-3 rounded-xl border-2 font-bold text-xs transition-all ${subUnitMode === 'many'
                                                     ? 'border-green-400 bg-green-50 text-green-600'
                                                     : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-green-200'
-                                            }`}>
+                                                }`}>
                                             มากกว่า 1 {subUnit}
                                         </button>
                                     </div>
@@ -2540,15 +2880,14 @@
                                                 { key: 'volume', label: 'ปริมาตร', sub: 'ml, L' },
                                                 { key: 'weight', label: 'น้ำหนัก', sub: 'g, kg' },
                                                 { key: 'custom', label: 'ระบุเอง', sub: 'พิมพ์หน่วยเพิ่ม' },
-                                                { key: 'none',   label: 'ไม่ระบุ',  sub: `฿/${subUnit}` },
+                                                { key: 'none', label: 'ไม่ระบุ', sub: `฿/${subUnit}` },
                                             ].map(({ key, label, sub }) => (
                                                 <button key={key} type="button"
                                                     onClick={() => setSubUnitCategory(key)}
-                                                    className={`py-2.5 rounded-xl border-2 font-bold text-[10px] leading-tight transition-all flex flex-col items-center gap-0.5 ${
-                                                        subUnitCategory === key
+                                                    className={`py-2.5 rounded-xl border-2 font-bold text-[10px] leading-tight transition-all flex flex-col items-center gap-0.5 ${subUnitCategory === key
                                                             ? 'border-blue-400 bg-blue-50 text-blue-600'
                                                             : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-blue-200'
-                                                    }`}>
+                                                        }`}>
                                                     <span className="text-base">{label.split(' ')[0]}</span>
                                                     <span>{label.split(' ').slice(1).join(' ')}</span>
                                                     <span className="text-gray-400 font-normal">{sub}</span>
@@ -2573,30 +2912,29 @@
                                                         onChange={e => setSubUnitSizeType(e.target.value)}
                                                         className="px-3 bg-gray-50 rounded-xl text-sm font-bold text-gray-700 border-2 border-transparent focus:border-blue-400 outline-none">
                                                         {subUnitCategory === 'volume'
-                                                            ? ['ml','L','cc'].map(u => <option key={u}>{u}</option>)
-                                                            : ['g','kg'].map(u => <option key={u}>{u}</option>)
+                                                            ? ['ml', 'L', 'cc'].map(u => <option key={u}>{u}</option>)
+                                                            : ['g', 'kg'].map(u => <option key={u}>{u}</option>)
                                                         }
                                                     </select>
                                                 </div>
                                                 {/* Quick size */}
-                                                    {subUnitCategory !== 'custom' && (
-                                                        <div className="flex flex-wrap gap-1.5">
-                                                            {(subUnitCategory === 'volume'
-                                                                ? [60,100,200,250,330,500,1000]
-                                                                : [50,100,200,500,1000]
-                                                            ).map(s => (
-                                                                <button key={s} type="button"
-                                                                    onClick={() => setSubUnitSize(String(s))}
-                                                                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors ${
-                                                                        subUnitSize === String(s)
-                                                                            ? 'bg-blue-500 text-white border-blue-500'
-                                                                            : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-blue-300'
+                                                {subUnitCategory !== 'custom' && (
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        {(subUnitCategory === 'volume'
+                                                            ? [60, 100, 200, 250, 330, 500, 1000]
+                                                            : [50, 100, 200, 500, 1000]
+                                                        ).map(s => (
+                                                            <button key={s} type="button"
+                                                                onClick={() => setSubUnitSize(String(s))}
+                                                                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors ${subUnitSize === String(s)
+                                                                        ? 'bg-blue-500 text-white border-blue-500'
+                                                                        : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-blue-300'
                                                                     }`}>
-                                                                    {s}
-                                                                </button>
-                                                            ))}
-                                                        </div>
-                                                    )}
+                                                                {s}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                     </div>
@@ -2621,21 +2959,19 @@
                                         <div className="grid grid-cols-2 gap-2">
                                             <button type="button"
                                                 onClick={() => { setSubUnitEqual(true); setSubUnitCategory(null); }}
-                                                className={`py-2.5 rounded-xl border-2 font-bold text-xs transition-all flex flex-col items-center justify-center gap-1 ${
-                                                    subUnitEqual === true
+                                                className={`py-2.5 rounded-xl border-2 font-bold text-xs transition-all flex flex-col items-center justify-center gap-1 ${subUnitEqual === true
                                                         ? 'border-green-400 bg-green-50 text-green-600'
                                                         : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-green-200'
-                                                }`}>
+                                                    }`}>
                                                 <CheckCircle2 size={18} />
                                                 <span>เท่ากัน</span>
                                             </button>
                                             <button type="button"
                                                 onClick={() => { setSubUnitEqual(false); setSubUnitCategory(null); }}
-                                                className={`py-2.5 rounded-xl border-2 font-bold text-xs transition-all flex flex-col items-center justify-center gap-1 ${
-                                                    subUnitEqual === false
+                                                className={`py-2.5 rounded-xl border-2 font-bold text-xs transition-all flex flex-col items-center justify-center gap-1 ${subUnitEqual === false
                                                         ? 'border-orange-400 bg-orange-50 text-orange-600'
                                                         : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-orange-200'
-                                                }`}>
+                                                    }`}>
                                                 <XCircle size={18} />
                                                 <span>ไม่เท่ากัน</span>
                                             </button>
@@ -2650,15 +2986,14 @@
                                                         { key: 'volume', label: 'ปริมาตร' },
                                                         { key: 'weight', label: 'น้ำหนัก' },
                                                         { key: 'custom', label: 'ระบุเอง' },
-                                                        { key: 'none',   label: 'ไม่ระบุ' },
+                                                        { key: 'none', label: 'ไม่ระบุ' },
                                                     ].map(({ key, label }) => (
                                                         <button key={key} type="button"
                                                             onClick={() => setSubUnitCategory(key)}
-                                                            className={`py-2 rounded-xl border-2 font-bold text-[10px] transition-all ${
-                                                                subUnitCategory === key
+                                                            className={`py-2 rounded-xl border-2 font-bold text-[10px] transition-all ${subUnitCategory === key
                                                                     ? 'border-blue-400 bg-blue-50 text-blue-600'
                                                                     : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-blue-200'
-                                                            }`}>
+                                                                }`}>
                                                             {label}
                                                         </button>
                                                     ))}
@@ -2678,8 +3013,8 @@
                                                                     onChange={e => setSubUnitSizeType(e.target.value)}
                                                                     className="px-3 bg-gray-50 rounded-xl text-sm font-bold text-gray-700 border-2 border-transparent focus:border-blue-400 outline-none">
                                                                     {subUnitCategory === 'volume'
-                                                                        ? ['ml','L','cc'].map(u => <option key={u}>{u}</option>)
-                                                                        : ['g','kg'].map(u => <option key={u}>{u}</option>)
+                                                                        ? ['ml', 'L', 'cc'].map(u => <option key={u}>{u}</option>)
+                                                                        : ['g', 'kg'].map(u => <option key={u}>{u}</option>)
                                                                     }
                                                                 </select>
                                                             )}
@@ -2687,19 +3022,18 @@
                                                         {subUnitCategory !== 'custom' && (
                                                             <div className="flex flex-wrap gap-1.5">
                                                                 {(subUnitCategory === 'volume'
-                                                                ? [60,100,200,250,330,500,1000]
-                                                                : [50,100,200,500,1000]
-                                                            ).map(s => (
-                                                                <button key={s} type="button"
-                                                                    onClick={() => setSubUnitSize(String(s))}
-                                                                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors ${
-                                                                        subUnitSize === String(s)
-                                                                            ? 'bg-blue-500 text-white border-blue-500'
-                                                                            : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-blue-300'
-                                                                    }`}>
-                                                                    {s}
-                                                                </button>
-                                                            ))}
+                                                                    ? [60, 100, 200, 250, 330, 500, 1000]
+                                                                    : [50, 100, 200, 500, 1000]
+                                                                ).map(s => (
+                                                                    <button key={s} type="button"
+                                                                        onClick={() => setSubUnitSize(String(s))}
+                                                                        className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors ${subUnitSize === String(s)
+                                                                                ? 'bg-blue-500 text-white border-blue-500'
+                                                                                : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-blue-300'
+                                                                            }`}>
+                                                                        {s}
+                                                                    </button>
+                                                                ))}
                                                             </div>
                                                         )}
                                                     </div>
@@ -2715,76 +3049,75 @@
                                                 setTimeout(() => setSubUnitSizes(next), 0);
                                             }
                                             return (
-                                            <div className="animate-fade-in space-y-3">
-                                                <div className="text-xs font-bold text-gray-500">แต่ละ{subUnit}มีปริมาณระบุไหม?</div>
-                                                <div className="grid grid-cols-3 gap-2 mb-1">
-                                                    {[
-                                                        { key: 'volume', label: 'ปริมาตร' },
-                                                        { key: 'weight', label: 'น้ำหนัก' },
-                                                        { key: 'custom', label: 'ระบุเอง' },
-                                                        { key: 'none',   label: 'ไม่ระบุ' },
-                                                    ].map(({ key, label }) => (
-                                                        <button key={key} type="button"
-                                                            onClick={() => setSubUnitCategory(key)}
-                                                            className={`py-2 rounded-xl border-2 font-bold text-[10px] transition-all ${
-                                                                subUnitCategory === key
-                                                                    ? 'border-orange-400 bg-orange-50 text-orange-600'
-                                                                    : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-orange-200'
-                                                            }`}>
-                                                            {label}
-                                                        </button>
-                                                    ))}
-                                                </div>
-
-                                                {(subUnitCategory === 'volume' || subUnitCategory === 'weight' || subUnitCategory === 'custom') && (
-                                                    <div className="animate-fade-in space-y-2">
-                                                        <div className="flex items-center justify-between">
-                                                            <div className="text-xs font-bold text-gray-500">กรอกปริมาณแต่ละ{subUnit}</div>
-                                                            {subUnitCategory === 'custom' ? (
-                                                                <div className="flex items-center gap-1">
-                                                                    <span className="text-[10px] text-gray-400">หน่วย:</span>
-                                                                    <input type="text" placeholder="หน่วย" value={subUnitSizeType} onChange={e => setSubUnitSizeType(e.target.value)} className="w-16 px-2 py-1 bg-gray-50 rounded-lg text-[10px] font-bold text-gray-700 border border-gray-200 focus:border-orange-400 outline-none text-center" />
-                                                                </div>
-                                                            ) : (
-                                                                <select value={subUnitSizeType}
-                                                                    onChange={e => setSubUnitSizeType(e.target.value)}
-                                                                    className="px-2 py-1 bg-gray-50 rounded-lg text-[10px] font-bold text-gray-700 border border-gray-200 focus:border-orange-400 outline-none">
-                                                                    {subUnitCategory === 'volume'
-                                                                        ? ['ml','L','cc'].map(u => <option key={u}>{u}</option>)
-                                                                        : ['g','kg'].map(u => <option key={u}>{u}</option>)
-                                                                    }
-                                                                </select>
-                                                            )}
-                                                        </div>
-                                                        <div className="space-y-1.5">
-                                                            {subUnitSizes.map((item, idx) => (
-                                                                <div key={idx} className="flex items-center gap-2">
-                                                                    <span className="text-[10px] font-bold text-gray-400 w-14 text-right shrink-0">{subUnit} {idx + 1}</span>
-                                                                    <input type="number" placeholder="ปริมาณ"
-                                                                        value={item.size}
-                                                                        inputMode="decimal"
-                                                                        onChange={e => {
-                                                                            const next = [...subUnitSizes];
-                                                                            next[idx] = { ...next[idx], size: e.target.value };
-                                                                            setSubUnitSizes(next);
-                                                                        }}
-                                                                        className="flex-1 p-2.5 bg-gray-50 rounded-xl text-sm font-bold text-gray-800 border-2 border-transparent focus:border-orange-400 outline-none text-center" />
-                                                                    <span className="text-[10px] font-bold text-gray-400 w-8">{subUnitSizeType}</span>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                        {subUnitSizes.some(s => s.size) && (() => {
-                                                            const total = subUnitSizes.reduce((acc, s) => acc + (parseFloat(s.size) || 0), 0);
-                                                            return (
-                                                                <div className="bg-orange-50 border border-orange-200 rounded-xl p-2.5 flex items-center justify-between">
-                                                                    <span className="text-[10px] font-bold text-orange-500">รวมทั้งหมด</span>
-                                                                    <span className="text-sm font-bold text-orange-600">{total} {subUnitSizeType}</span>
-                                                                </div>
-                                                            );
-                                                        })()}
+                                                <div className="animate-fade-in space-y-3">
+                                                    <div className="text-xs font-bold text-gray-500">แต่ละ{subUnit}มีปริมาณระบุไหม?</div>
+                                                    <div className="grid grid-cols-3 gap-2 mb-1">
+                                                        {[
+                                                            { key: 'volume', label: 'ปริมาตร' },
+                                                            { key: 'weight', label: 'น้ำหนัก' },
+                                                            { key: 'custom', label: 'ระบุเอง' },
+                                                            { key: 'none', label: 'ไม่ระบุ' },
+                                                        ].map(({ key, label }) => (
+                                                            <button key={key} type="button"
+                                                                onClick={() => setSubUnitCategory(key)}
+                                                                className={`py-2 rounded-xl border-2 font-bold text-[10px] transition-all ${subUnitCategory === key
+                                                                        ? 'border-orange-400 bg-orange-50 text-orange-600'
+                                                                        : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-orange-200'
+                                                                    }`}>
+                                                                {label}
+                                                            </button>
+                                                        ))}
                                                     </div>
-                                                )}
-                                            </div>
+
+                                                    {(subUnitCategory === 'volume' || subUnitCategory === 'weight' || subUnitCategory === 'custom') && (
+                                                        <div className="animate-fade-in space-y-2">
+                                                            <div className="flex items-center justify-between">
+                                                                <div className="text-xs font-bold text-gray-500">กรอกปริมาณแต่ละ{subUnit}</div>
+                                                                {subUnitCategory === 'custom' ? (
+                                                                    <div className="flex items-center gap-1">
+                                                                        <span className="text-[10px] text-gray-400">หน่วย:</span>
+                                                                        <input type="text" placeholder="หน่วย" value={subUnitSizeType} onChange={e => setSubUnitSizeType(e.target.value)} className="w-16 px-2 py-1 bg-gray-50 rounded-lg text-[10px] font-bold text-gray-700 border border-gray-200 focus:border-orange-400 outline-none text-center" />
+                                                                    </div>
+                                                                ) : (
+                                                                    <select value={subUnitSizeType}
+                                                                        onChange={e => setSubUnitSizeType(e.target.value)}
+                                                                        className="px-2 py-1 bg-gray-50 rounded-lg text-[10px] font-bold text-gray-700 border border-gray-200 focus:border-orange-400 outline-none">
+                                                                        {subUnitCategory === 'volume'
+                                                                            ? ['ml', 'L', 'cc'].map(u => <option key={u}>{u}</option>)
+                                                                            : ['g', 'kg'].map(u => <option key={u}>{u}</option>)
+                                                                        }
+                                                                    </select>
+                                                                )}
+                                                            </div>
+                                                            <div className="space-y-1.5">
+                                                                {subUnitSizes.map((item, idx) => (
+                                                                    <div key={idx} className="flex items-center gap-2">
+                                                                        <span className="text-[10px] font-bold text-gray-400 w-14 text-right shrink-0">{subUnit} {idx + 1}</span>
+                                                                        <input type="number" placeholder="ปริมาณ"
+                                                                            value={item.size}
+                                                                            inputMode="decimal"
+                                                                            onChange={e => {
+                                                                                const next = [...subUnitSizes];
+                                                                                next[idx] = { ...next[idx], size: e.target.value };
+                                                                                setSubUnitSizes(next);
+                                                                            }}
+                                                                            className="flex-1 p-2.5 bg-gray-50 rounded-xl text-sm font-bold text-gray-800 border-2 border-transparent focus:border-orange-400 outline-none text-center" />
+                                                                        <span className="text-[10px] font-bold text-gray-400 w-8">{subUnitSizeType}</span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                            {subUnitSizes.some(s => s.size) && (() => {
+                                                                const total = subUnitSizes.reduce((acc, s) => acc + (parseFloat(s.size) || 0), 0);
+                                                                return (
+                                                                    <div className="bg-orange-50 border border-orange-200 rounded-xl p-2.5 flex items-center justify-between">
+                                                                        <span className="text-[10px] font-bold text-orange-500">รวมทั้งหมด</span>
+                                                                        <span className="text-sm font-bold text-orange-600">{total} {subUnitSizeType}</span>
+                                                                    </div>
+                                                                );
+                                                            })()}
+                                                        </div>
+                                                    )}
+                                                </div>
                                             );
                                         })()}
                                     </div>
@@ -2799,8 +3132,8 @@
                                         ? subUnitMode === 'many' && subUnitEqual
                                             ? `· ${subUnit}ละ ${subUnitSize}${subUnitSizeType} · รวม ${(subUnitCount * parseFloat(subUnitSize)).toFixed(0)}${subUnitSizeType}`
                                             : subUnitMode === 'many' && !subUnitEqual && subUnitSizes.length > 0
-                                            ? `· รวม ${subUnitSizes.reduce((a, s) => a + (parseFloat(s.size) || 0), 0)}${subUnitSizeType}`
-                                            : `· ${subUnitSize}${subUnitSizeType}`
+                                                ? `· รวม ${subUnitSizes.reduce((a, s) => a + (parseFloat(s.size) || 0), 0)}${subUnitSizeType}`
+                                                : `· ${subUnitSize}${subUnitSizeType}`
                                         : '';
                                     return (
                                         <div className="bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-200 rounded-2xl p-4 space-y-2 animate-fade-in">
@@ -2921,7 +3254,7 @@
                         <div className="flex-1 overflow-y-auto pb-24">
                             <div className="bg-white p-4 mb-2 shadow-sm">
                                 <div className="flex gap-4 mb-2">
-                                    <div className="w-1/2 rounded-2xl border border-gray-100 flex-shrink-0 overflow-hidden bg-gray-50 aspect-square shadow-sm">
+                                    <div className="w-1/2 rounded-2xl border border-gray-100 flex-shrink-0 overflow-hidden bg-gray-50 aspect-square shadow-sm cursor-pointer" onClick={() => { if (selectedProduct.masterImage) setZoomedImage(selectedProduct.masterImage) }}>
                                         {selectedProduct.masterImage ? <img src={selectedProduct.masterImage} alt={selectedProduct.name} className="w-full h-full object-cover" /> : <ImagePlaceholder />}
                                     </div>
                                     <div className="flex-1 flex flex-col justify-between py-1">
@@ -3093,10 +3426,10 @@
                                                         </div>
                                                     </div>
                                                 </div>
-                                                
-                                                <CommentSection 
-                                                    itemId={deal.id} 
-                                                    currentUser={currentUser} 
+
+                                                <CommentSection
+                                                    itemId={deal.id}
+                                                    currentUser={currentUser}
                                                     setShowLoginModal={setShowLoginModal}
                                                     expanded={!!expandedComments[deal.id]}
                                                     setExpanded={(val) => setExpandedComments(prev => ({ ...prev, [deal.id]: val }))}
@@ -3355,7 +3688,7 @@
             };
 
             return (
-                <div className="min-h-screen bg-gray-900 flex justify-center font-sans">
+                <div className="min-h-screen bg-gray-900 flex justify-center font-sans" style={{ fontFamily: appFont === 'noto' ? '"Noto Sans Thai", sans-serif' : undefined }}>
                     <div className="w-full max-w-md bg-gray-100 shadow-2xl relative overflow-hidden flex flex-col h-[100dvh]">
 
                         {currentView !== 'store_detail' && currentView !== 'brand_detail' && currentView !== 'category_detail' && (
@@ -3373,12 +3706,24 @@
                                         </div>
                                     )}
                                 </div>
-                                <div className="text-sm font-medium text-white/80 animate-fade-in flex items-center gap-1">
-                                    {currentView === 'feed' && <><Home size={16} /> หน้าแรก</>}
-                                    {currentView === 'search' && <><Search size={16} /> ค้นหา</>}
-                                    {currentView === 'add' && <><Calculator size={16} /> เครื่องมือเช็คราคาและบอกต่อ</>}
-                                    {currentView === 'profile' && <><User size={16} /> โปรไฟล์ส่วนตัว</>}
-                                    {currentView === 'product_detail' && <><Package size={16} /> รายละเอียดสินค้า</>}
+                                <div className="text-sm font-medium text-white/80 animate-fade-in flex items-center justify-between w-full">
+                                    <div className="flex items-center gap-1">
+                                        {currentView === 'feed' && <><Home size={16} /> หน้าแรก</>}
+                                        {currentView === 'search' && <><Search size={16} /> ค้นหา</>}
+                                        {currentView === 'add' && <><Calculator size={16} /> เครื่องมือเช็คราคาและบอกต่อ</>}
+                                        {currentView === 'profile' && <><User size={16} /> โปรไฟล์ส่วนตัว</>}
+                                        {currentView === 'product_detail' && <><Package size={16} /> รายละเอียดสินค้า</>}
+                                    </div>
+                                    {currentView === 'profile' && (
+                                        <div className="flex items-center gap-3">
+                                            <button onClick={() => setShowReportModal(true)} className="hover:text-white transition-colors" title="รายงานปัญหา / ข้อเสนอแนะ">
+                                                <AlertCircle size={18} />
+                                            </button>
+                                            <button onClick={() => setShowSettingsModal(true)} className="hover:text-white transition-colors" title="ตั้งค่าระบบ">
+                                                <Settings size={18} />
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             </header>
                         )}
@@ -3398,6 +3743,14 @@
                             </button>
                         )}
 
+                        {/* Floating Tip-off Camera Button */}
+                        {currentView === 'add' && (
+                            <button onClick={() => setShowTipoffModal(true)}
+                                className="absolute bottom-20 right-4 text-white p-3.5 rounded-full shadow-lg hover:scale-105 transform transition-all flex items-center justify-center z-20 border-2 border-white animate-pulse-oy">
+                                <Camera size={22} />
+                            </button>
+                        )}
+
                         {currentView !== 'store_detail' && currentView !== 'brand_detail' && (
                             <nav className="absolute bottom-0 w-full bg-white border-t border-gray-200 flex justify-around py-3 pb-safe z-30 text-xs text-gray-500 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
                                 <button onClick={() => setCurrentView('feed')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'feed' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}><Home size={20} className={currentView === 'feed' ? 'fill-current' : ''} /> หน้าแรก</button>
@@ -3405,6 +3758,227 @@
                                 <button onClick={() => setCurrentView('add')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'add' ? 'text-green-500 font-bold' : 'hover:text-green-400'}`}><ListPlus size={20} /> บอกต่อ</button>
                                 <button onClick={() => setCurrentView('profile')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'profile' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}><User size={20} className={currentView === 'profile' ? 'fill-current' : ''} /> โปรไฟล์</button>
                             </nav>
+                        )}
+
+                        {/* PDPA BANNER */}
+                        {!pdpaAccepted && (
+                            <div className="absolute bottom-[70px] left-4 right-4 p-4 bg-white/95 backdrop-blur-md border border-gray-100 rounded-2xl z-[40] animate-slide-up shadow-2xl">
+                                <div className="flex flex-col gap-3">
+                                    <div className="flex items-start gap-3">
+                                        <div className="p-2 bg-blue-50 text-blue-500 rounded-xl flex-none">
+                                            <ShieldCheck size={20} />
+                                        </div>
+                                        <div className="flex-1">
+                                            <h4 className="text-sm font-bold text-gray-800">นโยบายความเป็นส่วนตัว</h4>
+                                            <p className="text-[11px] text-gray-500 font-medium leading-relaxed mt-0.5">
+                                                เรามีการเก็บข้อมูลราคาสินค้าที่คุณบันทึก เพื่อนำมาแสดงผลเปรียบเทียบราคาและปรับปรุงบริการให้ดียิ่งขึ้น
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <button 
+                                        onClick={() => { localStorage.setItem('pdpa_consent', 'true'); setPdpaAccepted(true); }}
+                                        className="w-full py-2.5 bg-green-500 hover:bg-green-600 text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98] shadow-md shadow-green-100"
+                                    >
+                                        ตกลงและยอมรับ
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* TIP-OFF MODAL */}
+                        {showTipoffModal && (
+                            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end justify-center animate-fade-in" onClick={() => setShowTipoffModal(false)}>
+                                <div className="bg-white rounded-t-3xl w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto animate-slide-up" onClick={e => e.stopPropagation()}>
+                                    <div className="p-6 pb-3 border-b border-gray-100 sticky top-0 bg-white z-10 rounded-t-3xl">
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <h2 className="text-lg font-bold text-gray-800">ฝากบอกต่อ 📸</h2>
+                                                <p className="text-xs text-gray-500 mt-0.5 font-medium">ถ่ายรูปสินค้า + ป้ายราคาที่เห็นชัด แล้วให้ admin ช่วยลงให้</p>
+                                            </div>
+                                            <button onClick={() => setShowTipoffModal(false)} className="w-8 h-8 bg-gray-100 text-gray-400 rounded-full flex items-center justify-center hover:bg-gray-200 transition-colors">
+                                                <X size={18} />
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="p-6 space-y-5">
+                                        {/* Photo section */}
+                                        <div>
+                                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2 block">📷 ถ่ายให้เห็นสินค้าและป้ายราคาชัดเจน <span className="text-red-500">*</span></label>
+                                            <div className="flex gap-3">
+                                                {[0, 1, 2].map(idx => (
+                                                    <div key={idx} className="w-24 h-24 relative">
+                                                        {tipoffImages[idx] ? (
+                                                            <div className="w-full h-full rounded-xl overflow-hidden border-2 border-orange-300 relative shadow-sm">
+                                                                <img src={tipoffImages[idx].preview} className="w-full h-full object-cover" />
+                                                                <button onClick={() => setTipoffImages(prev => prev.filter((_, i) => i !== idx))}
+                                                                    className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs shadow-md">
+                                                                    <X size={12} />
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <label className="w-full h-full border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-orange-400 hover:bg-orange-50/50 transition-all text-gray-400">
+                                                                <Camera size={20} />
+                                                                <span className="text-[9px] font-bold mt-1">รูปที่ {idx + 1}</span>
+                                                                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => {
+                                                                    const file = e.target.files?.[0];
+                                                                    if (file) {
+                                                                        const preview = URL.createObjectURL(file);
+                                                                        setTipoffImages(prev => [...prev.slice(0, idx), { file, preview }, ...prev.slice(idx + 1)].filter(Boolean).slice(0, 3));
+                                                                    }
+                                                                    e.target.value = '';
+                                                                }} />
+                                                            </label>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Item name */}
+                                        <div>
+                                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1 block">ชื่อสินค้า (ไม่บังคับ)</label>
+                                            <input type="text" placeholder="เช่น มาม่า รสหมู 55g" value={tipoffItemName} onChange={e => setTipoffItemName(e.target.value)}
+                                                className="w-full p-3 bg-gray-50 rounded-xl text-sm font-semibold text-gray-700 border-2 border-transparent focus:border-orange-400 outline-none" />
+                                        </div>
+
+                                        {/* Store selector */}
+                                        <div>
+                                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1 block">เจอที่ร้านไหน? <span className="text-red-500">*</span></label>
+                                            <input type="text" placeholder="พิมพ์ชื่อร้าน" value={tipoffStore} onChange={e => setTipoffStore(e.target.value)}
+                                                className="w-full p-3 mb-2 bg-gray-50 rounded-xl text-sm font-semibold text-gray-700 border-2 border-transparent focus:border-orange-400 outline-none" />
+                                            <div className="flex flex-wrap gap-2">
+                                                {['WATSONS', '7-11', "Lotus's", 'Makro', 'Shopee', 'Lazada'].map(s => (
+                                                    <button key={s} onClick={() => setTipoffStore(s)}
+                                                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-colors ${tipoffStore === s ? 'bg-orange-50 text-orange-600 border-orange-200' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
+                                                        {s}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Price */}
+                                        <div>
+                                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1 block">ราคาโดยประมาณ (ไม่บังคับ)</label>
+                                            <div className="relative">
+                                                <span className="absolute left-3 top-3 text-gray-400 font-bold text-sm">฿</span>
+                                                <input type="number" placeholder="0.00" value={tipoffPrice} onChange={e => setTipoffPrice(e.target.value)}
+                                                    className="w-full p-3 pl-8 bg-gray-50 rounded-xl text-sm font-semibold text-gray-700 border-2 border-transparent focus:border-orange-400 outline-none" />
+                                            </div>
+                                        </div>
+
+                                        {/* Submit */}
+                                        <button onClick={handleSubmitTipoff} disabled={isSubmittingTipoff || tipoffImages.length === 0 || !tipoffStore.trim()}
+                                            className={`w-full py-3.5 rounded-2xl font-bold text-sm transition-all shadow-md flex items-center justify-center gap-2 ${(tipoffImages.length > 0 && tipoffStore.trim()) ? 'bg-orange-500 hover:bg-orange-600 text-white active:scale-[0.98]' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>
+                                            {isSubmittingTipoff ? (
+                                                <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> กำลังส่ง...</>
+                                            ) : (
+                                                <><Upload size={16} /> ส่งให้ admin ตรวจสอบ</>
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* SELECTED TIP-OFF VIEW MODAL */}
+                        {selectedTipoffView && (
+                            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-end justify-center animate-fade-in" onClick={() => setSelectedTipoffView(null)}>
+                                <div className="bg-white rounded-t-3xl w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto animate-slide-up flex flex-col" onClick={e => e.stopPropagation()}>
+                                    <div className="p-6 pb-4 border-b border-gray-100 sticky top-0 bg-white z-10 flex items-center justify-between">
+                                        <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Camera size={20} className="text-orange-500" /> รายละเอียดฝากบอกต่อ</h2>
+                                        <button onClick={() => setSelectedTipoffView(null)} className="w-8 h-8 bg-gray-100 text-gray-500 rounded-full flex items-center justify-center hover:bg-gray-200">
+                                            <X size={18} />
+                                        </button>
+                                    </div>
+                                    
+                                    <div className="p-6 overflow-y-auto space-y-6">
+                                        {/* Images */}
+                                        <div className="grid grid-cols-3 gap-2">
+                                            {(selectedTipoffView.imageUrls || []).map((url, i) => (
+                                                <div key={i} onClick={() => setZoomedImage(url)} className="aspect-square rounded-xl overflow-hidden bg-gray-100 border border-gray-200 cursor-pointer hover:opacity-80 transition-opacity">
+                                                    <img src={url} className="w-full h-full object-cover" />
+                                                </div>
+                                            ))}
+                                            {(selectedTipoffView.imageUrls || []).length === 0 && (
+                                                <div className="col-span-3 aspect-video rounded-xl bg-gray-50 flex items-center justify-center border-2 border-dashed border-gray-200">
+                                                    <span className="text-sm font-bold text-gray-400">ไม่มีรูปภาพ</span>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Details */}
+                                        <div className="bg-gray-50 rounded-2xl p-4 space-y-3">
+                                            <div className="flex items-start justify-between gap-2">
+                                                <div>
+                                                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">สินค้า</p>
+                                                    <h3 className="font-bold text-gray-800 text-sm">{selectedTipoffView.itemName || <span className="text-gray-400 italic">ไม่ได้ระบุ</span>}</h3>
+                                                </div>
+                                                {selectedTipoffView.price > 0 && (
+                                                    <div className="text-right">
+                                                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">ราคา</p>
+                                                        <span className="text-sm font-bold text-blue-600">฿{selectedTipoffView.price}</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            {selectedTipoffView.store && (
+                                                <div>
+                                                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">ร้านค้า</p>
+                                                    <span className="text-xs font-bold text-gray-600 flex items-center gap-1.5 bg-white border border-gray-200 px-3 py-1.5 rounded-lg w-fit"><Store size={14} className="text-gray-400"/> {selectedTipoffView.store}</span>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Status & Feedback */}
+                                        <div>
+                                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2 block">สถานะ</p>
+                                            {(() => {
+                                                const statusMap = { pending: { Icon: Clock, label: 'รอ admin ตรวจสอบ', color: 'bg-yellow-50 text-yellow-700 border-yellow-200' }, approved: { Icon: CheckCircle, label: 'บอกต่อแล้ว', color: 'bg-green-50 text-green-700 border-green-200' }, rejected: { Icon: XCircle, label: 'ไม่ผ่านพิจารณา', color: 'bg-red-50 text-red-700 border-red-200' } };
+                                                const st = statusMap[selectedTipoffView.status] || statusMap.pending;
+                                                const StatusIcon = st.Icon;
+                                                return (
+                                                    <div className={`rounded-xl border p-4 flex flex-col gap-3 ${st.color}`}>
+                                                        <div className="flex items-center gap-2 font-bold text-sm">
+                                                            <StatusIcon size={18} /> {st.label}
+                                                        </div>
+                                                        {selectedTipoffView.adminNote && (
+                                                            <div className={`text-xs p-3 rounded-lg ${selectedTipoffView.status === 'rejected' ? 'bg-red-100 text-red-800' : 'bg-white/60'}`}>
+                                                                <span className="font-bold block mb-1">💬 หมายเหตุจากแอดมิน:</span>
+                                                                {selectedTipoffView.adminNote}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })()}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Top Toast Nudge for Anonymous Users */}
+                        {showTopToast && (
+                            <div className="fixed top-3 left-1/2 -translate-x-1/2 bg-white border-l-4 border-orange-500 rounded-xl shadow-[0_10px_25px_-5px_rgba(0,0,0,0.2)] z-[9999] flex flex-col p-3 w-[90%] max-w-[340px] animate-fade-in pointer-events-auto">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-lg flex-shrink-0">{topToastMessage.isSuccess ? '✅' : '🎉'}</span>
+                                    <p className="text-sm font-bold text-gray-800 flex-1 leading-snug">{topToastMessage.title}</p>
+                                </div>
+                                {!topToastMessage.isSuccess && (
+                                    <div className="flex gap-2 mt-3 w-full justify-end">
+                                        <button onClick={() => setShowTopToast(false)} className="px-3 py-1.5 text-xs font-bold text-gray-400 hover:bg-gray-50 rounded-lg transition-colors">ไว้ทีหลัง</button>
+                                        <button onClick={async () => {
+                                            try {
+                                                await linkWithPopup(auth.currentUser, googleProvider);
+                                                setTopToastMessage({ title: 'เชื่อมบัญชีแล้ว', isSuccess: true });
+                                                setTimeout(() => setShowTopToast(false), 2000);
+                                            } catch (e) {
+                                                console.error('Link account error:', e);
+                                                alert('เชื่อมบัญชีไม่สำเร็จ');
+                                            }
+                                        }} className="px-3 py-1.5 bg-orange-500 text-white text-xs font-bold rounded-lg hover:bg-orange-600 transition-colors shadow-sm">ผูก Google</button>
+                                    </div>
+                                )}
+                            </div>
                         )}
 
                         {/* LOGIN MODAL */}
@@ -3468,8 +4042,8 @@
                         {postReportDeal && (() => {
                             const REASONS = [
                                 { key: 'price_changed', label: '\u0e23\u0e32\u0e04\u0e32\u0e40\u0e1b\u0e25\u0e35\u0e48\u0e22\u0e19\u0e41\u0e25\u0e49\u0e27', color: 'orange' },
-                                { key: 'wrong_info',    label: '\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e44\u0e21\u0e48\u0e16\u0e39\u0e01\u0e15\u0e49\u0e2d\u0e07', color: 'red' },
-                                { key: 'fake',          label: '\u0e42\u0e1e\u0e2a\u0e15\u0e4c\u0e1b\u0e25\u0e2d\u0e21/\u0e2a\u0e41\u0e1b\u0e21', color: 'rose' },
+                                { key: 'wrong_info', label: '\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e44\u0e21\u0e48\u0e16\u0e39\u0e01\u0e15\u0e49\u0e2d\u0e07', color: 'red' },
+                                { key: 'fake', label: '\u0e42\u0e1e\u0e2a\u0e15\u0e4c\u0e1b\u0e25\u0e2d\u0e21/\u0e2a\u0e41\u0e1b\u0e21', color: 'rose' },
                             ];
                             const handleSubmitPostReport = async () => {
                                 if (!postReportReason) { alert('\u0e01\u0e23\u0e38\u0e13\u0e32\u0e40\u0e25\u0e37\u0e2d\u0e01\u0e40\u0e2b\u0e15\u0e38\u0e1c\u0e25\u0e01\u0e48\u0e2d\u0e19'); return; }
@@ -3515,11 +4089,10 @@
                                                 <div className="grid grid-cols-3 gap-2">
                                                     {REASONS.map(r => (
                                                         <button key={r.key} onClick={() => setPostReportReason(r.key)}
-                                                            className={`py-2.5 px-2 rounded-xl text-xs font-bold border-2 transition-all text-center ${
-                                                                postReportReason === r.key
+                                                            className={`py-2.5 px-2 rounded-xl text-xs font-bold border-2 transition-all text-center ${postReportReason === r.key
                                                                     ? `bg-${r.color}-50 border-${r.color}-400 text-${r.color}-600`
                                                                     : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
-                                                            }`}>
+                                                                }`}>
                                                             {r.label}
                                                         </button>
                                                     ))}
@@ -3566,9 +4139,8 @@
                             </div>
                         )}
 
-                        {/* IMAGE ZOOM */}
                         {zoomedImage && (
-                            <div className="absolute inset-0 bg-black/90 z-50 flex items-center justify-center backdrop-blur-sm animate-fade-in" onClick={() => setZoomedImage(null)}>
+                            <div className="absolute inset-0 bg-black/90 z-[10000] flex items-center justify-center backdrop-blur-sm animate-fade-in" onClick={() => setZoomedImage(null)}>
                                 <button className="absolute top-6 right-6 text-white/50 hover:text-white bg-black/30 w-10 h-10 rounded-full flex items-center justify-center transition-colors"><X size={24} /></button>
                                 <img src={zoomedImage} alt="Zoomed View" className="w-[90%] max-h-[80%] object-contain rounded-xl shadow-2xl" onClick={e => e.stopPropagation()} />
                             </div>
@@ -3715,7 +4287,7 @@
                                                 <span>·</span>
                                                 <span>โพสต์เมื่อ {d.timePosted}</span>
                                             </div>
-                                            
+
                                             {/* Comments */}
                                             <div className="mt-6">
                                                 <button onClick={() => setExpandedComments(prev => ({ ...prev, [d.id]: !prev[d.id] }))} className="w-full flex items-center justify-center gap-2 py-3 bg-gray-50 border border-gray-100 rounded-xl text-gray-600 font-bold hover:bg-gray-100 transition-colors shadow-sm">
@@ -3723,9 +4295,9 @@
                                                     {expandedComments[d.id] ? 'ซ่อนความคิดเห็น' : `แสดงความคิดเห็น (${commentCounts[d.id] ?? d.comments ?? 0})`}
                                                 </button>
                                                 <div className="mt-2">
-                                                    <CommentSection 
-                                                        itemId={d.id} 
-                                                        currentUser={currentUser} 
+                                                    <CommentSection
+                                                        itemId={d.id}
+                                                        currentUser={currentUser}
                                                         setShowLoginModal={setShowLoginModal}
                                                         expanded={!!expandedComments[d.id]}
                                                         setExpanded={(val) => setExpandedComments(prev => ({ ...prev, [d.id]: val }))}
@@ -3802,6 +4374,52 @@
                                         <button onClick={handleSubmitReport} disabled={isSubmittingReport || (!reportText.trim() && reportImages.length === 0)} className="flex-1 py-3 bg-orange-500 text-white rounded-xl font-bold text-sm shadow-md shadow-orange-200 hover:bg-orange-600 active:scale-95 transition-all disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
                                             {isSubmittingReport ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <>ส่งรายงาน</>}
                                         </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* SETTINGS MODAL */}
+                        {showSettingsModal && (
+                            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4 animate-fade-in">
+                                <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
+                                    <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+                                        <div className="flex items-center gap-2 text-gray-800">
+                                            <Settings className="w-5 h-5 text-gray-500" />
+                                            <h2 className="font-bold text-lg">ตั้งค่าระบบ</h2>
+                                        </div>
+                                        <button onClick={() => setShowSettingsModal(false)} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500"><X size={20} /></button>
+                                    </div>
+                                    <div className="p-5 space-y-6">
+                                        {/* Language Toggle */}
+                                        <div>
+                                            <label className="block text-sm font-bold text-gray-700 mb-3">ภาษา (Language)</label>
+                                            <div className="flex bg-gray-100 p-1 rounded-xl">
+                                                <button className="flex-1 py-2 text-sm font-bold rounded-lg bg-white text-orange-500 shadow-sm transition-all focus:outline-none">TH</button>
+                                                <button onClick={() => alert('not support yet')} className="flex-1 py-2 text-sm font-bold rounded-lg text-gray-500 hover:text-gray-700 transition-all focus:outline-none">EN</button>
+                                            </div>
+                                        </div>
+                                        {/* Font Toggle */}
+                                        <div>
+                                            <label className="block text-sm font-bold text-gray-700 mb-3">แบบอักษร</label>
+                                            <button
+                                                onClick={() => setAppFont(appFont === 'noto' ? 'sans' : 'noto')}
+                                                className="w-full relative flex flex-col items-center justify-center py-4 bg-gray-50 hover:bg-blue-50 border-2 border-gray-100 hover:border-blue-200 rounded-xl transition-all font-bold group"
+                                            >
+                                                <span className="text-xs text-gray-400 mb-1">คลิกเพื่อเปลี่ยนฟอนต์เป็น</span>
+                                                <span className="text-lg text-gray-700 group-hover:text-blue-600 transition-colors" style={{ fontFamily: appFont === 'noto' ? undefined : '"Noto Sans Thai", sans-serif' }}>เปลี่ยนฟอนต์</span>
+                                            </button>
+                                        </div>
+
+                                        {/* Auth Actions in Settings */}
+                                        <div className="pt-4 border-t border-gray-100">
+                                            {isLoggedIn && !isGuestUser && (
+                                                <button onClick={() => { handleLogout(); setShowSettingsModal(false); }} className="w-full px-6 py-3 bg-gray-100 hover:bg-red-50 text-gray-600 hover:text-red-500 text-sm font-bold rounded-xl transition-colors flex items-center justify-center gap-2"><Lock size={16} /> ออกจากระบบ</button>
+                                            )}
+                                            {isLoggedIn && isGuestUser && (
+                                                <button onClick={() => { handleLogout(); setShowSettingsModal(false); }} className="w-full px-6 py-3 bg-red-50 hover:bg-red-100 text-red-500 text-sm font-bold rounded-xl transition-colors flex items-center justify-center gap-2"><Lock size={16} /> ออกจากระบบ Guest (ข้อมูลจะสูญหาย)</button>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
