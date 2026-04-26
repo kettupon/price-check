@@ -1039,6 +1039,8 @@
             const [categoryLimit, setCategoryLimit] = useState(10);
             const [brandLimit, setBrandLimit] = useState(10);
             const searchSentinelRef = useRef(null);
+            const tipoffCameraRefs = useRef([]);
+            const tipoffGalleryRefs = useRef([]);
 
             useEffect(() => {
                 if (currentView !== 'search' || (searchQuery || '').length >= 2) return;
@@ -3873,18 +3875,37 @@
                                                                 </button>
                                                             </div>
                                                         ) : (
-                                                            <label className="w-full h-full border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-orange-400 hover:bg-orange-50/50 transition-all text-gray-400">
-                                                                <Camera size={20} />
-                                                                <span className="text-[9px] font-bold mt-1">รูปที่ {idx + 1}</span>
-                                                                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => {
-                                                                    const file = e.target.files?.[0];
-                                                                    if (file) {
-                                                                        const preview = URL.createObjectURL(file);
-                                                                        setTipoffImages(prev => [...prev.slice(0, idx), { file, preview }, ...prev.slice(idx + 1)].filter(Boolean).slice(0, 3));
-                                                                    }
-                                                                    e.target.value = '';
-                                                                }} />
-                                                            </label>
+                                                            <div className="w-full h-full border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center bg-gray-50/50 gap-1.5 p-1.5 overflow-hidden">
+                                                                <button onClick={() => tipoffCameraRefs.current[idx]?.click()} 
+                                                                    className="w-full flex items-center justify-center gap-1 py-1.5 bg-white border border-gray-200 rounded-lg text-gray-600 text-[10px] font-bold shadow-sm active:scale-95 transition-all hover:bg-orange-50 hover:border-orange-200 hover:text-orange-600">
+                                                                    <Camera size={12} /> ถ่ายรูป
+                                                                </button>
+                                                                <button onClick={() => tipoffGalleryRefs.current[idx]?.click()} 
+                                                                    className="w-full flex items-center justify-center gap-1 py-1.5 bg-white border border-gray-200 rounded-lg text-gray-600 text-[10px] font-bold shadow-sm active:scale-95 transition-all hover:bg-orange-50 hover:border-orange-200 hover:text-orange-600">
+                                                                    <ImageIcon size={12} /> เลือกรูป
+                                                                </button>
+                                                                
+                                                                <input type="file" ref={el => tipoffCameraRefs.current[idx] = el} accept="image/*" capture="environment" className="hidden" 
+                                                                    onChange={(e) => {
+                                                                        const file = e.target.files?.[0];
+                                                                        if (file) {
+                                                                            const preview = URL.createObjectURL(file);
+                                                                            setTipoffImages(prev => [...prev.slice(0, idx), { file, preview }, ...prev.slice(idx + 1)].filter(Boolean).slice(0, 3));
+                                                                        }
+                                                                        e.target.value = '';
+                                                                    }} 
+                                                                />
+                                                                <input type="file" ref={el => tipoffGalleryRefs.current[idx] = el} accept="image/*" className="hidden" 
+                                                                    onChange={(e) => {
+                                                                        const file = e.target.files?.[0];
+                                                                        if (file) {
+                                                                            const preview = URL.createObjectURL(file);
+                                                                            setTipoffImages(prev => [...prev.slice(0, idx), { file, preview }, ...prev.slice(idx + 1)].filter(Boolean).slice(0, 3));
+                                                                        }
+                                                                        e.target.value = '';
+                                                                    }} 
+                                                                />
+                                                            </div>
                                                         )}
                                                     </div>
                                                 ))}
