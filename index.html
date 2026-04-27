@@ -5,16 +5,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>DealHunter Prototype</title>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;700&display=swap" rel="stylesheet">
-    
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;700&display=swap"
+        rel="stylesheet">
+
     <meta name="theme-color" content="#48A111">
     <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <link rel="apple-touch-icon" href="icons/icon-180.png">
     <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js'); });
-      }
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js'); });
+        }
     </script>
 
     <script src="https://cdn.tailwindcss.com"></script>
@@ -105,8 +106,17 @@
         }
 
         @keyframes pulseOrangeYellow {
-            0%, 100% { background-color: #F97316; box-shadow: 0 0 12px rgba(249,115,22,0.5); }
-            50% { background-color: #FBBF24; box-shadow: 0 0 18px rgba(251,191,36,0.6); }
+
+            0%,
+            100% {
+                background-color: #F97316;
+                box-shadow: 0 0 12px rgba(249, 115, 22, 0.5);
+            }
+
+            50% {
+                background-color: #FBBF24;
+                box-shadow: 0 0 18px rgba(251, 191, 36, 0.6);
+            }
         }
 
         .animate-pulse-oy {
@@ -298,7 +308,7 @@
             return { likedItemIds, loadingLikes };
         };
 
-        const useComments = (itemId) => {
+        const useComments = (itemId, profile) => {
             const [comments, setComments] = useState([]);
             const [loadingComments, setLoadingComments] = useState(true);
 
@@ -340,13 +350,13 @@
                     await addDoc(collection(db, "items", itemId, "comments"), {
                         text,
                         userId: activeUser.uid,
-                        userDisplayName: activeUser.displayName || (activeUser.isAnonymous ? 'ผู้เยี่ยมชม' : 'ผู้ใช้'),
+                        userDisplayName: profile?.nickname || activeUser.displayName || (activeUser.isAnonymous ? 'ผู้เยี่ยมชม' : 'ผู้ใช้'),
                         userPhotoURL: activeUser.photoURL || null,
                         createdAt: new Date().toISOString(),
                         deleted: false
                     });
                     await updateDoc(doc(db, "items", itemId), { comments: increment(1) });
-                    
+
                     if (activeUser.isAnonymous) {
                         setTopToastMessage({ title: 'บันทึกแล้ว! สมัครบัญชีเพื่อไม่ให้ข้อมูลหาย', isSuccess: false });
                         setShowTopToast(true);
@@ -372,8 +382,8 @@
             return { comments, loadingComments, addComment, deleteComment };
         };
 
-        const CommentSection = ({ itemId, currentUser, setShowLoginModal, expanded, setExpanded, onCountUpdate }) => {
-            const { comments, loadingComments, addComment, deleteComment } = useComments(expanded ? itemId : null);
+        const CommentSection = ({ itemId, currentUser, setShowLoginModal, expanded, setExpanded, onCountUpdate, profile }) => {
+            const { comments, loadingComments, addComment, deleteComment } = useComments(expanded ? itemId : null, profile);
             const [newComment, setNewComment] = useState('');
             const [submitting, setSubmitting] = useState(false);
             const [showFullModal, setShowFullModal] = useState(false);
@@ -722,6 +732,18 @@
             const [pPhotoURL, setPPhotoURL] = useState(profile?.photoURL || currentUser?.photoURL || null);
             const [pErrors, setPErrors] = useState({});
             const [pSaving, setPSaving] = useState(false);
+
+            // Sync form fields when profile data loads asynchronously
+            useEffect(() => {
+                if (profile) {
+                    setPNickname(prev => prev || profile.nickname || currentUser?.displayName || '');
+                    setPFirstName(prev => prev || profile.firstName || '');
+                    setPLastName(prev => prev || profile.lastName || '');
+                    setPMobile(prev => prev || profile.mobile || '');
+                    setPProvince(prev => prev || profile.province || '');
+                    setPPhotoURL(prev => prev || profile.photoURL || currentUser?.photoURL || null);
+                }
+            }, [profile]);
             const [showNicknameRequest, setShowNicknameRequest] = useState(false);
             const [reqNickname, setReqNickname] = useState('');
             const [reqReason, setReqReason] = useState('');
@@ -1165,7 +1187,7 @@
                     }
                     await addDoc(collection(db, "tipoffs"), {
                         userId: activeUser.uid,
-                        userDisplayName: activeUser.displayName || (activeUser.isAnonymous ? 'ผู้เยี่ยมชม' : 'ผู้ใช้'),
+                        userDisplayName: profile?.nickname || activeUser.displayName || (activeUser.isAnonymous ? 'ผู้เยี่ยมชม' : 'ผู้ใช้'),
                         imageUrls,
                         itemName: tipoffItemName.trim(),
                         store: tipoffStore.trim(),
@@ -1176,7 +1198,7 @@
                     });
                     setTipoffImages([]); setTipoffItemName(''); setTipoffStore(''); setTipoffPrice('');
                     setShowTipoffModal(false);
-                    
+
                     if (activeUser.isAnonymous) {
                         setTopToastMessage({ title: 'บันทึกแล้ว! สมัครบัญชีเพื่อไม่ให้ข้อมูลหาย', isSuccess: false });
                         setShowTopToast(true);
@@ -1243,7 +1265,7 @@
                     timestamp: Date.now(),
                     resultCount: searchResultCountRef.current,
                     hasResults: searchResultCountRef.current > 0
-                }).catch(() => {});
+                }).catch(() => { });
             }, [debouncedSearchQuery]);
 
             useEffect(() => {
@@ -1313,7 +1335,7 @@
                             const q = query(collection(db, "items"), where("userId", "==", user.uid));
                             const snap = await getDocs(q);
                             const updates = snap.docs.map(d => updateDoc(doc(db, "items", d.id), {
-                                userDisplayName: user.displayName || 'ผู้ใช้',
+                                userDisplayName: profile?.nickname || user.displayName || 'ผู้ใช้',
                                 userPhotoURL: user.photoURL || null
                             }));
                             await Promise.all(updates);
@@ -1708,15 +1730,15 @@
                 try {
                     await addDoc(collection(db, "reports"), {
                         text: reportText.trim(), images: reportImages,
-                        userId: activeUser.uid, 
-                        userDisplayName: activeUser.displayName || (activeUser.isAnonymous ? 'ผู้เยี่ยมชม' : 'ผู้ใช้'),
+                        userId: activeUser.uid,
+                        userDisplayName: profile?.nickname || activeUser.displayName || (activeUser.isAnonymous ? 'ผู้เยี่ยมชม' : 'ผู้ใช้'),
                         createdAt: Date.now(), status: 'pending',
                         itemId: selectedProduct?.id || null,
                         itemUnitQty: selectedProduct?.unitQuantity || 1,
                         itemUnitType: selectedProduct?.unitType || 'ชิ้น'
                     });
                     setShowReportModal(false); setReportText(''); setReportImages([]);
-                    
+
                     if (activeUser.isAnonymous) {
                         setTopToastMessage({ title: 'บันทึกแล้ว! สมัครบัญชีเพื่อไม่ให้ข้อมูลหาย', isSuccess: false });
                         setShowTopToast(true);
@@ -1780,6 +1802,16 @@
                 setShowConfirmModal(true);
             };
 
+            const resetAddDealForm = () => {
+                setItemName(''); setBrand(''); setPrice(''); setUnit(1); setUnitDisplay('1'); setStore('');
+                setSubUnit('ชิ้น'); setSubUnitCount(1); setSubUnitSize(''); setSubUnitSizeType('ml'); setSubUnitMode(null); setSubUnitCategory(null); setSubUnitEqual(null); setSubUnitSizes([]);
+                setUseCashback(false); setCashbackAmount(''); setUsePromo(false); setPromoCode('');
+                setIsMemberPrice(false); setProductUrl('');
+                setImageBase64(null); setTags([]); setTagInput(''); setShippingType('included');
+                setShippingFee(''); setIncludeShippingInPpu(false);
+                setTipoffRefImages([]); setIsItemLocked(false);
+            };
+
             const executeSaveDeal = async () => {
                 // LAZY_AUTH_GATE
                 if (!auth.currentUser) {
@@ -1812,7 +1844,7 @@
                         isMemberPrice,
                         image: imageBase64 || '', lastUpdated: Date.now(),
                         userId: activeUser.uid,
-                        userDisplayName: activeUser.displayName || (activeUser.isAnonymous ? 'ผู้เยี่ยมชม' : 'ผู้ใช้'),
+                        userDisplayName: profile?.nickname || activeUser.displayName || (activeUser.isAnonymous ? 'ผู้เยี่ยมชม' : 'ผู้ใช้'),
                         userPhotoURL: activeUser.photoURL || null,
                         productUrl: productUrl || ''
                     });
@@ -1825,13 +1857,7 @@
                         timestamp: Date.now()
                     });
 
-                    setItemName(''); setBrand(''); setPrice(''); setUnit(1); setUnitDisplay('1'); setStore('');
-                    setSubUnit('ชิ้น'); setSubUnitCount(1); setSubUnitSize(''); setSubUnitSizeType('ml'); setSubUnitMode(null); setSubUnitCategory(null); setSubUnitEqual(null); setSubUnitSizes([]);
-                    setUseCashback(false); setCashbackAmount(''); setUsePromo(false); setPromoCode('');
-                    setIsMemberPrice(false); setProductUrl('');
-                    setImageBase64(null); setTags([]); setTagInput(''); setShippingType('included');
-                    setShippingFee(''); setIncludeShippingInPpu(false);
-                    setTipoffRefImages([]); // Clear prefill reference images
+                    resetAddDealForm();
                     setShowConfirmModal(false); setCurrentView('feed');
 
                     if (activeUser.isAnonymous) {
@@ -2006,7 +2032,7 @@
                                     itemName: deal.name,
                                     userId: auth.currentUser?.uid || "guest",
                                     timestamp: Date.now()
-                                }).catch(() => {});
+                                }).catch(() => { });
                             }
                             setSelectedProduct(deal); setShowAllVariants(false); setIsDescriptionExpanded(false); setCurrentView('product_detail');
                         }}
@@ -2065,7 +2091,7 @@
                                     </div>
                                 )}
                             </div>
-                            
+
                             {status === 'outdated' && (
                                 <div className="mt-2 text-[8px] text-amber-700 bg-amber-50 px-1 py-1 rounded border border-amber-200 font-bold flex items-center gap-1">
                                     ⚠️ ราคานี้อาจเปลี่ยนแล้ว รอ admin ตรวจสอบ
@@ -2360,7 +2386,7 @@
                         const status = deal.status || 'active';
                         if (status === 'hidden') return false;
                         if (status === 'expired') return false; // not in main feed
-                        
+
                         const vg = variantGroups.find(v => v.items && v.items.includes(deal.name));
                         if (vg && vg.items.length >= 2) {
                             if (seenVG.has(vg.id)) return false;
@@ -2499,6 +2525,13 @@
                                         : 'bg-white text-gray-600 border border-gray-200 hover:bg-purple-50 hover:text-purple-600 hover:border-purple-200'}`}>
                                     <Tag size={11} /> ค้นหายี่ห้อ
                                 </button>
+                                <button
+                                    onClick={() => { setSearchFilterMode('shop'); setActiveCategoryFilter(null); setActiveBrandFilter(null); }}
+                                    className={`whitespace-nowrap flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold transition-all flex-shrink-0 ${searchFilterMode === 'shop'
+                                        ? 'bg-green-600 text-white shadow-sm shadow-green-200'
+                                        : 'bg-white text-gray-600 border border-gray-200 hover:bg-green-50 hover:text-green-600 hover:border-green-200'}`}>
+                                    <Store size={11} /> ค้นหาร้านค้า
+                                </button>
                             </div>
 
                             {/* ── Category chips (shown in category mode) ── */}
@@ -2537,6 +2570,27 @@
                                                 <Tag size={11} /> {brand}
                                                 <span className={`text-[9px] px-1 py-0.5 rounded-full ml-0.5 font-bold bg-gray-100 text-gray-400`}>
                                                     {deals.filter(d => d.brand === brand).length}
+                                                </span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                ) : null;
+                            })()}
+
+                            {/* ── Shop chips (shown in shop mode) ── */}
+                            {searchFilterMode === 'shop' && (() => {
+                                const q = (searchQuery || '').trim().toLowerCase();
+                                const filtered = q ? stores.filter(s => (s.name || s.id || '').toLowerCase().includes(q)) : stores;
+                                return filtered.length > 0 ? (
+                                    <div className="flex gap-2 overflow-x-auto hide-scrollbar mt-2 pb-0.5">
+                                        {filtered.map(store => (
+                                            <button
+                                                key={store.id}
+                                                onClick={() => { setSelectedStoreForDetail(store); setCurrentView('store_detail'); }}
+                                                className={`whitespace-nowrap flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold transition-all flex-shrink-0 bg-white text-gray-600 border border-gray-200 hover:bg-green-50 hover:text-green-600 hover:border-green-200`}>
+                                                <Store size={11} /> {store.name || store.id}
+                                                <span className={`text-[9px] px-1 py-0.5 rounded-full ml-0.5 font-bold bg-gray-100 text-gray-400`}>
+                                                    {getStoreDeals(store.id).length}
                                                 </span>
                                             </button>
                                         ))}
@@ -2682,6 +2736,9 @@
                                 <button onClick={() => { setCurrentView('feed'); setIsItemLocked(false); }} className="p-1 -ml-1 text-gray-400 hover:text-gray-600">
                                     <ChevronLeft size={20} />
                                 </button>
+                                <button onClick={() => resetAddDealForm()} className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-yellow-50 text-yellow-600 border border-yellow-200 hover:bg-yellow-100 active:scale-95 transition-all">
+                                    ล้างค่า
+                                </button>
                                 {store && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-widest bg-gray-200/80 text-gray-500 truncate max-w-[80px]">{store}</span>}
                             </div>
                             {[
@@ -2810,7 +2867,7 @@
                             <input type="text" placeholder="พิมพ์ชื่อร้าน หรือเลือกจากด้านล่าง" value={store} onChange={(e) => setStore(e.target.value)}
                                 className="w-full p-3 mb-2 bg-gray-50 rounded-xl text-sm font-semibold text-gray-700 border-2 border-transparent focus:border-green-500 outline-none" />
                             <div className="flex flex-wrap gap-2">
-                                {['WATSONS', '7-11', 'Lotus\'s', 'Makro', 'Shopee', 'Lazada'].map(s => (
+                                {['WATSONS', '7-11', 'Lotus\'s', 'Makro', 'Shopee', 'CJ', 'Lazada'].map(s => (
                                     <button key={s} onClick={() => setStore(s)}
                                         className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase border transition-colors ${store === s ? 'bg-green-50 text-green-600 border-green-200' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
                                         {s}
@@ -2894,13 +2951,13 @@
                                     </div>
 
                                     {/* Quick subUnit suggestions */}
-                                    <div className="flex flex-wrap gap-1.5 mb-4">
+                                    <div className="grid grid-cols-7 gap-1.5 mb-4">
                                         {['ชิ้น', 'ซอง', 'ขวด', 'ถุง', 'กล่อง', 'อัน', 'แพ็ค'].map(u => (
                                             <button key={u} type="button"
                                                 onClick={() => setSubUnit(u)}
-                                                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors ${subUnit === u
-                                                        ? 'bg-orange-500 text-white border-orange-500'
-                                                        : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-orange-300'
+                                                className={`w-full py-1 rounded-lg text-[10px] font-bold border transition-colors ${subUnit === u
+                                                    ? 'bg-orange-500 text-white border-orange-500'
+                                                    : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-orange-300'
                                                     }`}>
                                                 {u}
                                             </button>
@@ -2912,16 +2969,16 @@
                                         <button type="button"
                                             onClick={() => { setSubUnitMode('one'); setSubUnitCount(1); setSubUnitCategory(null); setSubUnitEqual(null); }}
                                             className={`py-3 rounded-xl border-2 font-bold text-xs transition-all ${subUnitMode === 'one'
-                                                    ? 'border-green-400 bg-green-50 text-green-600'
-                                                    : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-green-200'
+                                                ? 'border-green-400 bg-green-50 text-green-600'
+                                                : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-green-200'
                                                 }`}>
                                             1 {subUnit}
                                         </button>
                                         <button type="button"
                                             onClick={() => { setSubUnitMode('many'); setSubUnitCount(2); setSubUnitCategory(null); setSubUnitEqual(null); }}
                                             className={`py-3 rounded-xl border-2 font-bold text-xs transition-all ${subUnitMode === 'many'
-                                                    ? 'border-green-400 bg-green-50 text-green-600'
-                                                    : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-green-200'
+                                                ? 'border-green-400 bg-green-50 text-green-600'
+                                                : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-green-200'
                                                 }`}>
                                             มากกว่า 1 {subUnit}
                                         </button>
@@ -2944,8 +3001,8 @@
                                                 <button key={key} type="button"
                                                     onClick={() => setSubUnitCategory(key)}
                                                     className={`py-2.5 rounded-xl border-2 font-bold text-[10px] leading-tight transition-all flex flex-col items-center gap-0.5 ${subUnitCategory === key
-                                                            ? 'border-blue-400 bg-blue-50 text-blue-600'
-                                                            : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-blue-200'
+                                                        ? 'border-blue-400 bg-blue-50 text-blue-600'
+                                                        : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-blue-200'
                                                         }`}>
                                                     <span className="text-base">{label.split(' ')[0]}</span>
                                                     <span>{label.split(' ').slice(1).join(' ')}</span>
@@ -2986,8 +3043,8 @@
                                                             <button key={s} type="button"
                                                                 onClick={() => setSubUnitSize(String(s))}
                                                                 className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors ${subUnitSize === String(s)
-                                                                        ? 'bg-blue-500 text-white border-blue-500'
-                                                                        : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-blue-300'
+                                                                    ? 'bg-blue-500 text-white border-blue-500'
+                                                                    : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-blue-300'
                                                                     }`}>
                                                                 {s}
                                                             </button>
@@ -3004,13 +3061,18 @@
                                     <div className="bg-white rounded-2xl border-2 border-gray-100 p-4 animate-fade-in space-y-3">
                                         <div className="text-xs font-bold text-gray-500">มีกี่{subUnit}?</div>
                                         <div className="flex gap-2 items-center">
+                                            <button type="button" onClick={() => setSubUnitCount(prev => Math.max(2, (parseInt(prev) || 2) - 1))}
+                                                className="w-8 h-8 rounded-lg bg-red-50 border border-red-200 text-red-400 font-bold text-sm flex items-center justify-center active:scale-90 transition-transform hover:bg-red-100">−</button>
                                             <input
                                                 type="number"
                                                 value={subUnitCount}
                                                 inputMode="numeric"
-                                                onChange={e => setSubUnitCount(Math.max(2, parseInt(e.target.value) || 2))}
-                                                className="w-20 p-3 bg-gray-50 rounded-xl text-sm font-bold text-gray-800 border-2 border-transparent focus:border-green-400 outline-none text-center"
+                                                onChange={e => setSubUnitCount(e.target.value)}
+                                                onBlur={e => { const v = parseInt(e.target.value); setSubUnitCount(v >= 2 ? v : 2); }}
+                                                className="w-16 p-2.5 bg-gray-50 rounded-xl text-sm font-bold text-gray-800 border-2 border-transparent focus:border-green-400 outline-none text-center"
                                             />
+                                            <button type="button" onClick={() => setSubUnitCount(prev => (parseInt(prev) || 2) + 1)}
+                                                className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-300 text-blue-500 font-bold text-lg flex items-center justify-center active:scale-90 transition-transform hover:bg-blue-100 shadow-sm">+</button>
                                             <span className="text-sm font-bold text-gray-500">{subUnit}</span>
                                         </div>
 
@@ -3019,8 +3081,8 @@
                                             <button type="button"
                                                 onClick={() => { setSubUnitEqual(true); setSubUnitCategory(null); }}
                                                 className={`py-2.5 rounded-xl border-2 font-bold text-xs transition-all flex flex-col items-center justify-center gap-1 ${subUnitEqual === true
-                                                        ? 'border-green-400 bg-green-50 text-green-600'
-                                                        : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-green-200'
+                                                    ? 'border-green-400 bg-green-50 text-green-600'
+                                                    : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-green-200'
                                                     }`}>
                                                 <CheckCircle2 size={18} />
                                                 <span>เท่ากัน</span>
@@ -3028,8 +3090,8 @@
                                             <button type="button"
                                                 onClick={() => { setSubUnitEqual(false); setSubUnitCategory(null); }}
                                                 className={`py-2.5 rounded-xl border-2 font-bold text-xs transition-all flex flex-col items-center justify-center gap-1 ${subUnitEqual === false
-                                                        ? 'border-orange-400 bg-orange-50 text-orange-600'
-                                                        : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-orange-200'
+                                                    ? 'border-orange-400 bg-orange-50 text-orange-600'
+                                                    : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-orange-200'
                                                     }`}>
                                                 <XCircle size={18} />
                                                 <span>ไม่เท่ากัน</span>
@@ -3050,8 +3112,8 @@
                                                         <button key={key} type="button"
                                                             onClick={() => setSubUnitCategory(key)}
                                                             className={`py-2 rounded-xl border-2 font-bold text-[10px] transition-all ${subUnitCategory === key
-                                                                    ? 'border-blue-400 bg-blue-50 text-blue-600'
-                                                                    : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-blue-200'
+                                                                ? 'border-blue-400 bg-blue-50 text-blue-600'
+                                                                : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-blue-200'
                                                                 }`}>
                                                             {label}
                                                         </button>
@@ -3087,8 +3149,8 @@
                                                                     <button key={s} type="button"
                                                                         onClick={() => setSubUnitSize(String(s))}
                                                                         className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors ${subUnitSize === String(s)
-                                                                                ? 'bg-blue-500 text-white border-blue-500'
-                                                                                : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-blue-300'
+                                                                            ? 'bg-blue-500 text-white border-blue-500'
+                                                                            : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-blue-300'
                                                                             }`}>
                                                                         {s}
                                                                     </button>
@@ -3120,8 +3182,8 @@
                                                             <button key={key} type="button"
                                                                 onClick={() => setSubUnitCategory(key)}
                                                                 className={`py-2 rounded-xl border-2 font-bold text-[10px] transition-all ${subUnitCategory === key
-                                                                        ? 'border-orange-400 bg-orange-50 text-orange-600'
-                                                                        : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-orange-200'
+                                                                    ? 'border-orange-400 bg-orange-50 text-orange-600'
+                                                                    : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-orange-200'
                                                                     }`}>
                                                                 {label}
                                                             </button>
@@ -3497,6 +3559,7 @@
                                                         expanded={!!expandedComments[deal.id]}
                                                         setExpanded={(val) => setExpandedComments(prev => ({ ...prev, [deal.id]: val }))}
                                                         onCountUpdate={(cnt) => setCommentCounts(prev => ({ ...prev, [deal.id]: cnt }))}
+                                                        profile={profile}
                                                     />
                                                     {isExpired && <div style={{ position: 'absolute', bottom: 0, left: 0, fontSize: '10px', color: '#9CA3AF', background: '#F3F4F6', padding: '2px 8px', borderRadius: '0 6px 0 0' }}>ใช้อ้างอิงเท่านั้น</div>}
                                                 </div>
@@ -3561,7 +3624,7 @@
                                 <div className="flex-1 min-w-0 flex items-center gap-3">
                                     <StoreLogo storeId={storeId} size="md" />
                                     <div className="min-w-0">
-                                        <div className="flex items-center gap-2"><h2 className="text-lg font-bold text-gray-800 truncate">{storeId}</h2></div>
+                                        <div className="flex items-center gap-2"><h2 className="text-lg font-bold text-gray-800 truncate">{selectedStoreForDetail.name || storeId}</h2></div>
                                         {selectedStoreForDetail.province && <div className="text-xs text-gray-400 flex items-center gap-1 mt-0.5"><MapPin size={10} /> {selectedStoreForDetail.province}</div>}
                                     </div>
                                 </div>
@@ -3569,7 +3632,7 @@
                             </div>
                             <div className="px-4 pb-3">
                                 <div className="relative">
-                                    <input type="text" placeholder={`ค้นหาสินค้าใน ${storeId}...`} value={storeSearchQuery} onChange={(e) => setStoreSearchQuery(e.target.value)}
+                                    <input type="text" placeholder={`ค้นหาสินค้าใน ${selectedStoreForDetail.name || storeId}...`} value={storeSearchQuery} onChange={(e) => setStoreSearchQuery(e.target.value)}
                                         className="w-full py-2.5 pl-9 pr-4 bg-gray-50 rounded-xl text-sm font-medium text-gray-800 focus:outline-none border-2 border-transparent focus:border-orange-500 transition-colors" />
                                     <Search className="absolute left-3 top-3 text-gray-400" size={15} />
                                     {storeSearchQuery && <button onClick={() => setStoreSearchQuery('')} className="absolute right-3 top-3 text-gray-400"><X size={15} /></button>}
@@ -3769,7 +3832,7 @@
                         {currentView !== 'store_detail' && currentView !== 'brand_detail' && currentView !== 'category_detail' && (
                             <header className="bg-green-500 text-white p-4 rounded-b-2xl shadow-md z-10 flex-none">
                                 <div className="flex justify-between items-center mb-3">
-                                    <h1 className="text-2xl font-bold flex items-center gap-2"><Zap className="fill-current" /> DealHunter</h1>
+                                    <h1 className="text-2xl font-bold flex items-center gap-2"><Zap className="fill-current" /> แกะบอกต่อ </h1>
                                     {isLoggedIn ? (
                                         <div onClick={() => setCurrentView('profile')} className="flex items-center gap-2 bg-black/20 hover:bg-black/30 cursor-pointer transition-colors px-3 py-1 rounded-full backdrop-blur-sm">
                                             {userPhotoURL ? <img src={userPhotoURL} alt={userDisplayName} className="w-6 h-6 rounded-full border border-white/30" /> : <User size={16} className="text-white" />}
@@ -3806,7 +3869,7 @@
                         {currentView === 'category_detail' && renderCategoryDetail()}
 
                         {currentView === 'feed' && (
-                            <button onClick={() => setCurrentView('add')} className="absolute bottom-20 right-6 bg-gradient-to-br from-green-400 to-green-600 text-white p-4 rounded-full shadow-lg shadow-green-200 hover:scale-105 transform transition-all flex items-center justify-center z-20 border-2 border-white">
+                            <button onClick={() => { resetAddDealForm(); setCurrentView('add'); }} className="absolute bottom-20 right-6 bg-gradient-to-br from-green-400 to-green-600 text-white p-4 rounded-full shadow-lg shadow-green-200 hover:scale-105 transform transition-all flex items-center justify-center z-20 border-2 border-white">
                                 <Plus size={24} />
                             </button>
                         )}
@@ -3820,10 +3883,11 @@
                         )}
 
                         {currentView !== 'store_detail' && currentView !== 'brand_detail' && (
-                            <nav className="absolute bottom-0 w-full bg-white border-t border-gray-200 flex justify-around py-3 pb-safe z-30 text-xs text-gray-500 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
+                            <nav className="absolute bottom-0 w-full bg-white border-t border-gray-200 flex justify-around pt-3 z-30 text-xs text-gray-500 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]"
+                                style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 8px)' }}>
                                 <button onClick={() => setCurrentView('feed')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'feed' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}><Home size={20} className={currentView === 'feed' ? 'fill-current' : ''} /> หน้าแรก</button>
                                 <button onClick={() => { setCurrentView('search'); setActiveCategoryFilter(null); setActiveBrandFilter(null); setSearchFilterMode('all'); }} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'search' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}><Search size={20} /> ค้นหา</button>
-                                <button onClick={() => setCurrentView('add')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'add' ? 'text-green-500 font-bold' : 'hover:text-green-400'}`}><ListPlus size={20} /> บอกต่อ</button>
+                                <button onClick={() => { if (currentView !== 'add') resetAddDealForm(); setCurrentView('add'); }} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'add' ? 'text-green-500 font-bold' : 'hover:text-green-400'}`}><ListPlus size={20} /> บอกต่อ</button>
                                 <button onClick={() => setCurrentView('profile')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'profile' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}><User size={20} className={currentView === 'profile' ? 'fill-current' : ''} /> โปรไฟล์</button>
                             </nav>
                         )}
@@ -3843,7 +3907,7 @@
                                             </p>
                                         </div>
                                     </div>
-                                    <button 
+                                    <button
                                         onClick={() => { localStorage.setItem('pdpa_consent', 'true'); setPdpaAccepted(true); }}
                                         className="w-full py-2.5 bg-green-500 hover:bg-green-600 text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98] shadow-md shadow-green-100"
                                     >
@@ -3886,16 +3950,16 @@
                                                             </div>
                                                         ) : (
                                                             <div className="w-full h-full border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center bg-gray-50/50 gap-1.5 p-1.5 overflow-hidden">
-                                                                <button onClick={() => tipoffCameraRefs.current[idx]?.click()} 
+                                                                <button onClick={() => tipoffCameraRefs.current[idx]?.click()}
                                                                     className="w-full flex items-center justify-center gap-1 py-1.5 bg-white border border-gray-200 rounded-lg text-gray-600 text-[10px] font-bold shadow-sm active:scale-95 transition-all hover:bg-orange-50 hover:border-orange-200 hover:text-orange-600">
                                                                     <Camera size={12} /> ถ่ายรูป
                                                                 </button>
-                                                                <button onClick={() => tipoffGalleryRefs.current[idx]?.click()} 
+                                                                <button onClick={() => tipoffGalleryRefs.current[idx]?.click()}
                                                                     className="w-full flex items-center justify-center gap-1 py-1.5 bg-white border border-gray-200 rounded-lg text-gray-600 text-[10px] font-bold shadow-sm active:scale-95 transition-all hover:bg-orange-50 hover:border-orange-200 hover:text-orange-600">
                                                                     <ImageIcon size={12} /> เลือกรูป
                                                                 </button>
-                                                                
-                                                                <input type="file" ref={el => tipoffCameraRefs.current[idx] = el} accept="image/*" capture="environment" className="hidden" 
+
+                                                                <input type="file" ref={el => tipoffCameraRefs.current[idx] = el} accept="image/*" capture="environment" className="hidden"
                                                                     onChange={(e) => {
                                                                         const file = e.target.files?.[0];
                                                                         if (file) {
@@ -3903,9 +3967,9 @@
                                                                             setTipoffImages(prev => [...prev.slice(0, idx), { file, preview }, ...prev.slice(idx + 1)].filter(Boolean).slice(0, 3));
                                                                         }
                                                                         e.target.value = '';
-                                                                    }} 
+                                                                    }}
                                                                 />
-                                                                <input type="file" ref={el => tipoffGalleryRefs.current[idx] = el} accept="image/*" className="hidden" 
+                                                                <input type="file" ref={el => tipoffGalleryRefs.current[idx] = el} accept="image/*" className="hidden"
                                                                     onChange={(e) => {
                                                                         const file = e.target.files?.[0];
                                                                         if (file) {
@@ -3913,7 +3977,7 @@
                                                                             setTipoffImages(prev => [...prev.slice(0, idx), { file, preview }, ...prev.slice(idx + 1)].filter(Boolean).slice(0, 3));
                                                                         }
                                                                         e.target.value = '';
-                                                                    }} 
+                                                                    }}
                                                                 />
                                                             </div>
                                                         )}
@@ -3978,7 +4042,7 @@
                                             <X size={18} />
                                         </button>
                                     </div>
-                                    
+
                                     <div className="p-6 overflow-y-auto space-y-6">
                                         {/* Images */}
                                         <div className="grid grid-cols-3 gap-2">
@@ -4011,7 +4075,7 @@
                                             {selectedTipoffView.store && (
                                                 <div>
                                                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">ร้านค้า</p>
-                                                    <span className="text-xs font-bold text-gray-600 flex items-center gap-1.5 bg-white border border-gray-200 px-3 py-1.5 rounded-lg w-fit"><Store size={14} className="text-gray-400"/> {selectedTipoffView.store}</span>
+                                                    <span className="text-xs font-bold text-gray-600 flex items-center gap-1.5 bg-white border border-gray-200 px-3 py-1.5 rounded-lg w-fit"><Store size={14} className="text-gray-400" /> {selectedTipoffView.store}</span>
                                                 </div>
                                             )}
                                         </div>
@@ -4075,7 +4139,7 @@
                                     <button onClick={() => setShowLoginModal(false)} className="absolute top-4 right-4 w-8 h-8 bg-gray-100 text-gray-400 rounded-full flex items-center justify-center hover:bg-gray-200 transition-colors z-10"><X size={20} /></button>
                                     <div className="p-8 pb-4 flex flex-col items-center border-b border-gray-50 bg-green-50/50">
                                         <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center text-green-500 mb-4 shadow-sm border border-green-100"><Zap size={40} className="fill-current" /></div>
-                                        <h2 className="text-xl font-bold text-gray-800 text-center">เข้าสู่ระบบ DealHunter</h2>
+                                        <h2 className="text-xl font-bold text-gray-800 text-center">เข้าสู่ระบบ แกะบอกต่อ</h2>
                                         <p className="text-xs text-gray-500 mt-1 font-medium text-center">เลือกวิธีเข้าสู่ระบบ</p>
                                     </div>
                                     <div className="p-6 space-y-3">
@@ -4178,8 +4242,8 @@
                                                     {REASONS.map(r => (
                                                         <button key={r.key} onClick={() => setPostReportReason(r.key)}
                                                             className={`py-2.5 px-2 rounded-xl text-xs font-bold border-2 transition-all text-center ${postReportReason === r.key
-                                                                    ? `bg-${r.color}-50 border-${r.color}-400 text-${r.color}-600`
-                                                                    : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
+                                                                ? `bg-${r.color}-50 border-${r.color}-400 text-${r.color}-600`
+                                                                : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
                                                                 }`}>
                                                             {r.label}
                                                         </button>
@@ -4391,6 +4455,7 @@
                                                         expanded={!!expandedComments[d.id]}
                                                         setExpanded={(val) => setExpandedComments(prev => ({ ...prev, [d.id]: val }))}
                                                         onCountUpdate={(cnt) => setCommentCounts(prev => ({ ...prev, [d.id]: cnt }))}
+                                                        profile={profile}
                                                     />
                                                 </div>
                                             </div>
