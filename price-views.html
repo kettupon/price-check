@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+  <title>Price Admin</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        green: {
+                            50: '#f0f9eb', 100: '#dbf2ce', 200: '#bae6a1', 300: '#92d571',
+                            400: '#6dc147', 500: '#48A111', 600: '#387e0d', 700: '#2c610b',
+                            800: '#214709', 900: '#183107',
+                        },
+                        orange: {
+                            50: '#fffcf1', 100: '#fff6db', 200: '#ffebb5', 300: '#ffdc89',
+                            400: '#ffbd45', 500: '#FF8C00', 600: '#e67300', 700: '#bf5700',
+                            800: '#994000', 900: '#7d3300',
+                        }
+                    }
+                }
+            }
+        }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap');
+    *, *::before, *::after { box-sizing: border-box; margin: 0; }
+    body { font-family: 'Noto Sans Thai', sans-serif; background: #f1f5f9; min-height: 100vh; }
+    .mono { font-family: 'IBM Plex Mono', monospace; }
+
+    .fade { animation: fade .22s ease; }
+    @keyframes fade { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }
+
+    input[type=number] { -moz-appearance:textfield; }
+    input[type=number]::-webkit-outer-spin-button,
+    input[type=number]::-webkit-inner-spin-button { -webkit-appearance:none; }
+
+    .modal-bg { position:fixed;inset:0;background:rgba(15,23,42,.55);backdrop-filter:blur(4px);z-index:300;display:flex;align-items:center;justify-content:center;padding:1rem; }
+
+    ::-webkit-scrollbar { width:4px; }
+    ::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:9px; }
+
+    .sku-panel { display:grid; grid-template-columns:230px 1fr; }
+    .store-row-grid { display:grid; grid-template-columns:130px 1fr; }
+    .card-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+    @media(max-width:1200px){ .card-grid{ grid-template-columns:repeat(3,1fr); } }
+    @media(max-width:900px) { .card-grid{ grid-template-columns:repeat(2,1fr); } }
+
+    .img-placeholder { background:linear-gradient(140deg,#f8fafc,#e2e8f0); border:1.5px solid #e2e8f0; border-radius:10px; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+    .img-placeholder img { width:100%; height:100%; object-fit:cover; }
+
+    .dot-lotus{background:#00a650;} .dot-makro{background:#1a3faa;} .dot-bigc{background:#e30613;}
+    .pill-lotus{background:#e6f7ed;color:#00843d;border:1px solid #a7e3c0;}
+    .pill-makro{background:#e8edf9;color:#1a3faa;border:1px solid #b0c0ee;}
+    .pill-bigc {background:#fdeaea;color:#c0001a;border:1px solid #f5b3bb;}
+    .dot-fallback{background:#94a3b8;}
+    .pill-fallback{background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;}
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.294.0",
+        "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
+        "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"
+      }
+    }
+  </script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-type="module">
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { createRoot } from 'react-dom/client';
+import { Package, Store, Search, ChevronLeft, ChevronRight, Check, X, Tag, ShoppingBag, AlertTriangle, Sprout, ShieldCheck, Plus } from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { getFirestore, collection, onSnapshot, query, orderBy, addDoc, updateDoc, doc } from 'firebase/firestore';
+
+const firebaseConfig = {
+    apiKey: "AIzaSyByDvi-wyekFdKMiMv_Cb2yUq9yF0Tw3Uc",
+    authDomain: "price-check-86915.firebaseapp.com",
+    projectId: "price-check-86915",
+    storageBucket: "price-check-86915.firebasestorage.app",
+    messagingSenderId: "510258152666",
+    appId: "1:510258152666:web:bc24bd3f34e704488e91e3"
+};
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+// ── DATA ─────────────────────────────────────────────────────────────────────
+const PAGE = 20;
+const fmt = n => n==null?'—':`฿${Number(n).toLocaleString('th-TH',{minimumFractionDigits:2})}`;
+const dotCls  = s => s==='Lotus'?'dot-lotus':s==='Makro'?'dot-makro':s==='BigC'?'dot-bigc':'dot-fallback';
+const pillCls = s => s==='Lotus'?'pill-lotus':s==='Makro'?'pill-makro':s==='BigC'?'pill-bigc':'pill-fallback';
+
+// ── IMG ───────────────────────────────────────────────────────────────────────
+const ImgBox = ({w=200,h=200,r=10, src=null}) => (
+  <div className="img-placeholder flex-shrink-0" style={{width:w,height:h,borderRadius:r}}>
+    {src ? <img src={src} alt="Product"/> : <ShoppingBag size={w*.38} color="#94a3b8"/>}
+  </div>
+);
+
+// ── ADD SKU MODAL ─────────────────────────────────────────────────────────────
+function AddSkuModal({ onSave, onClose }) {
+  const [step, setStep] = useState(1);
+  const [form, setForm] = useState({
+    name: '', brand: '', category: '', unitType: '', subUnitCount: '', subUnit: '',
+    subUnitSize: '', subUnitSizeType: 'g', image: ''
+  });
+  const [saving, setSaving] = useState(false);
+
+  const handleNext = (e) => {
+    e.preventDefault();
+    if (!form.name) return;
+    setStep(2);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    await onSave({
+      ...form,
+      subUnitCount: form.subUnitCount ? Number(form.subUnitCount) : null,
+      subUnitSize: form.subUnitSize ? Number(form.subUnitSize) : null,
+    });
+    setSaving(false);
+  };
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden fade" onClick={e=>e.stopPropagation()}>
+        <div className="px-5 py-4 flex items-center gap-3 bg-indigo-600 text-white">
+          <Package size={20}/>
+          <div>
+            <div className="font-bold text-base">เพิ่มสินค้าใหม่ (Main SKU)</div>
+            <div className="text-xs text-indigo-200">สร้างรายการสินค้าเข้าสู่ Catalog หลัก</div>
+          </div>
+        </div>
+        
+        {step === 1 ? (
+          <form onSubmit={handleNext} className="p-5 space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2">
+                <label className="block text-xs font-bold text-slate-500 mb-1">ชื่อสินค้า (Name) *</label>
+                <input value={form.name} onChange={e=>setForm({...form, name:e.target.value})} required autoFocus
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">ยี่ห้อ (Brand)</label>
+                <input value={form.brand} onChange={e=>setForm({...form, brand:e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">หมวดหมู่ (Category)</label>
+                <input value={form.category} onChange={e=>setForm({...form, category:e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">หน่วยหลัก (Unit Type)</label>
+                <input value={form.unitType} onChange={e=>setForm({...form, unitType:e.target.value})} placeholder="เช่น ซอง, แพ็ค"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">จำนวนหน่วยย่อย (SubUnit Count)</label>
+                <input type="number" value={form.subUnitCount} onChange={e=>setForm({...form, subUnitCount:e.target.value})} placeholder="เช่น 1, 6, 12"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">หน่วยย่อย (SubUnit)</label>
+                <input value={form.subUnit} onChange={e=>setForm({...form, subUnit:e.target.value})} placeholder="เช่น ซอง, ชิ้น"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="block text-xs font-bold text-slate-500 mb-1">ขนาด/น้ำหนัก</label>
+                  <input type="number" value={form.subUnitSize} onChange={e=>setForm({...form, subUnitSize:e.target.value})} placeholder="ตัวเลข"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+                </div>
+                <div className="w-20">
+                  <label className="block text-xs font-bold text-slate-500 mb-1">หน่วย</label>
+                  <select value={form.subUnitSizeType} onChange={e=>setForm({...form, subUnitSizeType:e.target.value})}
+                    className="w-full px-2 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none">
+                    <option value="g">g</option>
+                    <option value="ml">ml</option>
+                    <option value="kg">kg</option>
+                    <option value="l">l</option>
+                  </select>
+                </div>
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs font-bold text-slate-500 mb-1">รูปภาพ URL (Image) - เลือกได้</label>
+                <input value={form.image} onChange={e=>setForm({...form, image:e.target.value})} placeholder="https://..."
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+              </div>
+            </div>
+            <div className="flex gap-3 pt-3 border-t border-slate-100">
+              <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-slate-500 border border-slate-200 bg-white hover:bg-slate-50">ยกเลิก</button>
+              <button type="submit" className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 flex items-center justify-center gap-2">
+                ส่งไปยัง Catalog MAIN SKU →
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="p-5 space-y-4 fade">
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 text-sm space-y-2">
+              <div className="font-bold text-slate-800 border-b border-slate-200 pb-2 mb-2">สรุปข้อมูลสินค้า</div>
+              <div className="grid grid-cols-[100px_1fr] gap-1">
+                <span className="text-slate-500">ชื่อสินค้า:</span><span className="font-semibold">{form.name}</span>
+                <span className="text-slate-500">ยี่ห้อ:</span><span className="font-semibold">{form.brand || '-'}</span>
+                <span className="text-slate-500">หมวดหมู่:</span><span className="font-semibold">{form.category || '-'}</span>
+                <span className="text-slate-500">หน่วยหลัก:</span><span className="font-semibold">{form.unitType || '-'}</span>
+                <span className="text-slate-500">จำนวนย่อย:</span><span className="font-semibold">{form.subUnitCount ? `${form.subUnitCount} ${form.subUnit}` : '-'}</span>
+                <span className="text-slate-500">ขนาด:</span><span className="font-semibold">{form.subUnitSize ? `${form.subUnitSize}${form.subUnitSizeType}` : '-'}</span>
+              </div>
+            </div>
+
+            <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-xl flex gap-3 text-yellow-800 text-xs">
+              <AlertTriangle className="flex-shrink-0 text-yellow-500" size={16}/>
+              <div className="leading-relaxed">
+                <strong>⚠️ สินค้านี้จะถูกเพิ่มเข้า Catalog เท่านั้น</strong><br/>
+                จะไม่แสดงบนหน้าหลักของแอพ จนกว่าจะมีราคาอย่างน้อย 1 ร้าน หากต้องการให้ผู้ใช้เห็น ให้กลับมา Seed ราคาในขั้นตอนถัดไป
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-3 border-t border-slate-100">
+              <button onClick={()=>setStep(1)} disabled={saving} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-slate-500 border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50">← แก้ไข</button>
+              <button onClick={handleSave} disabled={saving} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-green-600 hover:bg-green-700 flex items-center justify-center gap-2 disabled:opacity-50">
+                <Check size={16}/> {saving ? 'กำลังบันทึก...' : 'ยืนยัน บันทึก'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── CONFIRM MODAL ─────────────────────────────────────────────────────────────
+function Confirm({d,onOk,onCancel}) {
+  return (
+    <div className="modal-bg" onClick={onCancel}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden fade" onClick={e=>e.stopPropagation()}>
+        <div className="px-5 py-4 flex items-center gap-3" style={{background:'#0f172a'}}>
+          <AlertTriangle size={18} color="#fb923c"/>
+          <div>
+            <div className="text-white font-bold text-sm">ยืนยันอัปเดตราคา</div>
+            <div className="text-xs" style={{color:'rgba(255,255,255,.4)'}}>Price update confirmation</div>
+          </div>
+        </div>
+        <div className="p-5 space-y-3">
+          <div className="bg-slate-50 rounded-xl p-3">
+            <div className="text-slate-800 font-bold text-sm leading-snug">{d.sku.name}</div>
+            <div className="mono text-slate-400 text-xs mt-1">#{d.sku.id}</div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className={`text-xs font-bold px-2.5 py-1 rounded-lg ${pillCls(d.store.id)}`}>{d.store.name}</span>
+            <span className="text-slate-400 line-through text-sm mono">{fmt(d.oldPrice)}</span>
+            <span className="text-slate-400 text-xs">→</span>
+            <span className="text-green-600 font-bold text-base mono">{fmt(d.newPrice)}</span>
+          </div>
+        </div>
+        <div className="px-5 pb-5 flex gap-2.5">
+          <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-slate-500 border border-slate-200 bg-white hover:bg-slate-50">ยกเลิก</button>
+          <button onClick={onOk} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-green-500 hover:bg-green-600 flex items-center justify-center gap-1.5">
+            <Check size={14}/> ยืนยัน
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── STORE PRICE ROW (inside SKU panel) ───────────────────────────────────────
+function StorePriceRow({store,sp,onSave}) {
+  const [edit, setEdit] = useState(false);
+  const [val,  setVal]  = useState('');
+  const ref = useRef();
+
+  const start = () => { setVal(sp.price!=null?String(sp.price):''); setEdit(true); setTimeout(()=>ref.current?.focus(),20); };
+  const commit = () => { const n=parseFloat(val); if(!isNaN(n)&&n>0) onSave(store,sp.price,n); setEdit(false); };
+
+  return (
+    <div className="store-row-grid border-b border-slate-100 last:border-b-0" style={{minHeight:42}}>
+      <div className="flex items-center gap-2 px-3 border-r border-slate-100">
+        {store.logoUrl ? (
+            <img src={store.logoUrl} alt={store.name} className="w-4 h-4 rounded-full object-cover flex-shrink-0" />
+        ) : (
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dotCls(store.id)}`}/>
+        )}
+        <span className="text-slate-700 text-sm font-semibold truncate">{store.name}</span>
+        {sp.status==='none' && <span className="ml-auto text-[10px] font-bold text-red-400 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded">ไม่มี</span>}
+      </div>
+      <div className="flex items-center px-3 gap-2" style={{minHeight:42}}>
+        {edit ? (
+          <>
+            <div className="relative flex-1">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-bold">฿</span>
+              <input ref={ref} type="number" value={val}
+                onChange={e=>setVal(e.target.value)}
+                onKeyDown={e=>{if(e.key==='Enter')commit();if(e.key==='Escape')setEdit(false);}}
+                className="w-full pl-6 pr-2 py-1.5 mono text-sm font-bold border-2 border-orange-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-200"/>
+            </div>
+            <button onClick={commit}   className="text-green-600 hover:text-green-700 flex-shrink-0"><Check size={15}/></button>
+            <button onClick={()=>setEdit(false)} className="text-slate-300 hover:text-slate-500 flex-shrink-0"><X size={15}/></button>
+          </>
+        ) : (
+          <button onClick={start} className="group flex items-center gap-2 w-full px-2 py-1 rounded-lg hover:bg-orange-50 text-left transition-colors">
+            <span className={`mono text-sm font-bold ${sp.price==null?'text-slate-300 italic':'text-slate-800'}`}>
+              {sp.price!=null ? fmt(sp.price) : '+ ใส่ราคา'}
+            </span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+              className="ml-auto text-slate-300 group-hover:text-orange-500 transition-colors flex-shrink-0">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── SKU ROW ───────────────────────────────────────────────────────────────────
+function SkuRow({sku,stores,onSave,delay=0}) {
+  const missing = stores.filter(s=>sku.storePrices[s.id]?.status==='none').length;
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden sku-panel fade" style={{animationDelay:`${delay}s`}}>
+      <div className="flex flex-col items-center justify-center gap-2 bg-slate-50 border-r border-slate-100 p-3">
+        <ImgBox w={200} h={200} src={sku.baseItem?.image || null}/>
+        <span className="mono text-[10px] text-slate-400 text-center leading-tight truncate w-full px-1">#{sku.id.substring(0,8)}</span>
+        {missing>0 && <span className="text-[10px] font-bold text-red-400 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-md">ขาด {missing} ร้าน</span>}
+      </div>
+      <div className="flex flex-col min-w-0">
+        <div className="px-4 py-2.5 border-b border-slate-100">
+          <div className="text-slate-800 font-semibold text-[13px] leading-snug line-clamp-2">{sku.name}</div>
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+            <span className="text-[11px] text-indigo-600 font-semibold bg-indigo-50 px-1.5 py-0.5 rounded-md border border-indigo-100">{sku.brand || 'No Brand'}</span>
+            <span className="text-[11px] text-slate-400">{sku.unit}</span>
+          </div>
+        </div>
+        <div className="store-row-grid" style={{background:'#1e293b'}}>
+          <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider border-r border-slate-700" style={{color:'rgba(255,255,255,.4)'}}>ร้าน</div>
+          <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider" style={{color:'rgba(255,255,255,.4)'}}>ราคาต่อหน่วย</div>
+        </div>
+        {stores.map(store=>(
+          <StorePriceRow key={store.id} store={store} sp={sku.storePrices[store.id] || { price: null, status: 'none' }}
+            onSave={(st,old,nw)=>onSave(sku,st,old,nw)}/>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── MAIN SKU VIEW ─────────────────────────────────────────────────────────────
+function MainSkuView({skus,stores,onSaveReq}) {
+  const [q,setQ] = useState('');
+  const [page,setPage] = useState(1);
+
+  const filtered = useMemo(()=>{
+    const t=q.toLowerCase().trim();
+    return !t?skus:skus.filter(s=>s.name.toLowerCase().includes(t)||s.id.toLowerCase().includes(t)||(s.brand||'').toLowerCase().includes(t));
+  },[skus,q]);
+
+  const total = Math.ceil(filtered.length/PAGE);
+  const paged = filtered.slice((page-1)*PAGE, page*PAGE);
+
+  return (
+    <div className="fade space-y-4">
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-xs">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+          <input value={q} onChange={e=>{setQ(e.target.value);setPage(1);}} placeholder="ค้นหาชื่อ / รหัส / แบรนด์..."
+            className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-sm bg-white shadow-sm focus:border-orange-400 focus:ring-1 focus:ring-orange-200 focus:outline-none"/>
+        </div>
+        <span className="text-xs text-slate-400">{filtered.length} รายการ · หน้า {page}/{total||1}</span>
+      </div>
+
+      <div className="space-y-3">
+        {paged.map((sku,i)=>(
+          <SkuRow key={sku.id} sku={sku} stores={stores} delay={i*0.025}
+            onSave={(sku,store,old,nw)=>onSaveReq({sku,store,oldPrice:old,newPrice:nw})}/>
+        ))}
+        {!paged.length && <div className="bg-white rounded-2xl border border-slate-100 py-16 text-center text-slate-400 text-sm">ไม่พบสินค้า</div>}
+      </div>
+
+      {total>1 && (
+        <div className="flex items-center justify-center gap-1.5 pt-2">
+          <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1}
+            className="w-9 h-9 rounded-xl border border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:border-orange-300 disabled:opacity-40 disabled:cursor-not-allowed">
+            <ChevronLeft size={15}/>
+          </button>
+          {Array.from({length:total},(_,i)=>i+1)
+            .filter(p=>p===1||p===total||Math.abs(p-page)<=1)
+            .reduce((a,p,i,arr)=>{if(i>0&&p-arr[i-1]>1)a.push('…');a.push(p);return a;},[])
+            .map((p,i)=>p==='…'
+              ?<span key={`e${i}`} className="w-9 h-9 flex items-center justify-center text-slate-400 text-xs">…</span>
+              :<button key={p} onClick={()=>setPage(p)}
+                  className={`w-9 h-9 rounded-xl text-xs font-bold transition-colors ${page===p?'bg-orange-500 text-white shadow-sm':'border border-slate-200 bg-white text-slate-600 hover:border-orange-300'}`}>{p}</button>
+            )}
+          <button onClick={()=>setPage(p=>Math.min(total,p+1))} disabled={page===total}
+            className="w-9 h-9 rounded-xl border border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:border-orange-300 disabled:opacity-40 disabled:cursor-not-allowed">
+            <ChevronRight size={15}/>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── STORE VIEW — 5-col grid cards ─────────────────────────────────────────────
+function StoreCard({sku,store,onSaveReq}) {
+  const sp = sku.storePrices[store.id] || { status: 'none', price: null };
+  const missing = sp.status==='none';
+  const [val,setVal] = useState(sp.price!=null?String(sp.price):'');
+
+  const save = () => {
+    const n=parseFloat(val);
+    if(!isNaN(n)&&n>0) onSaveReq({sku,store,oldPrice:sp.price,newPrice:n});
+  };
+
+  return (
+    <div className={`flex flex-col rounded-2xl border overflow-hidden transition-shadow hover:shadow-md
+      ${missing?'border-red-300 bg-red-50/60':'border-slate-200 bg-white'}`}>
+      <div className={`flex flex-col items-center justify-center pt-4 pb-2 gap-1.5 ${missing?'bg-red-100/60':'bg-slate-50'}`}>
+        <ImgBox w={200} h={200} r={8} src={sku.baseItem?.image || null}/>
+        {missing
+          ? <span className="text-[10px] font-bold text-red-500 bg-red-100 border border-red-300 px-1.5 py-0.5 rounded-md">ไม่มีสินค้า</span>
+          : <span className="text-[10px] text-green-600 font-bold">● มีแล้ว</span>
+        }
+      </div>
+      <div className="px-3 pt-2 pb-1 flex-1 flex flex-col gap-1">
+        <div className="text-slate-800 text-[12px] font-semibold leading-snug line-clamp-2">{sku.name}</div>
+        <div className="flex flex-wrap items-center gap-1 mt-1">
+          <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded-md">{sku.mainSku}</span>
+        </div>
+        <div className="mono text-[10px] text-slate-400">#{sku.id.substring(0,8)} · {sku.unit}</div>
+      </div>
+      <div className="px-3 pb-3 pt-1 space-y-1.5">
+        <div className="relative">
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-bold mono">฿</span>
+          <input type="number" value={val} onChange={e=>setVal(e.target.value)}
+            onKeyDown={e=>{if(e.key==='Enter')save();}}
+            placeholder="0.00"
+            className={`w-full pl-6 pr-2 py-1.5 rounded-lg mono text-sm font-bold focus:outline-none focus:ring-2 focus:ring-orange-200
+              ${missing
+                ?'border-2 border-red-300 bg-white focus:border-orange-400'
+                :'border border-slate-200 bg-slate-50 focus:border-orange-400 focus:bg-white'}`}/>
+        </div>
+        <button onClick={save}
+          className={`w-full py-1.5 rounded-lg text-[12px] font-bold text-white transition-colors
+            ${missing?'bg-red-500 hover:bg-red-600':'bg-slate-800 hover:bg-slate-900'}`}>
+          {missing ? '+ Seed ราคา' : 'บันทึก'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function StoreView({skus,stores,onSaveReq}) {
+  const [selectedStoreId, setSelectedStoreId] = useState('');
+  const [q,setQ] = useState('');
+  const [f,setF] = useState('all'); 
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    if (!selectedStoreId && stores.length > 0) {
+      setSelectedStoreId(stores[0].id);
+    }
+  }, [stores, selectedStoreId]);
+
+  const rows = useMemo(()=>{
+    if(!selectedStoreId) return [];
+    const t=q.toLowerCase().trim();
+    return skus.filter(s=>{
+      const ok = !t||s.name.toLowerCase().includes(t)||s.id.toLowerCase().includes(t);
+      const sp=s.storePrices[selectedStoreId] || { status: 'none' };
+      if(f==='missing') return ok&&sp.status==='none';
+      if(f==='has')     return ok&&sp.status!=='none';
+      return ok;
+    });
+  },[skus,selectedStoreId,q,f]);
+
+  const miss = selectedStoreId ? skus.filter(s=>(s.storePrices[selectedStoreId]?.status||'none')==='none').length : 0;
+  const has  = skus.length - miss;
+
+  const total = Math.ceil(rows.length/PAGE);
+  const paged = rows.slice((page-1)*PAGE, page*PAGE);
+
+  const handleStoreChange = (id) => { setSelectedStoreId(id); setPage(1); };
+  const handleFilterChange = (val) => { setF(val); setPage(1); };
+  const handleSearch = (e) => { setQ(e.target.value); setPage(1); };
+
+  const activeStoreObj = stores.find(s => s.id === selectedStoreId);
+
+  return (
+    <div className="fade space-y-4">
+      <div className="flex items-center gap-2 flex-wrap">
+        {stores.map(s=>(
+          <button key={s.id} onClick={()=>handleStoreChange(s.id)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border-2 transition-all
+              ${selectedStoreId===s.id?'bg-slate-900 text-white border-slate-900 shadow-md scale-[1.03]':'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
+            {s.logoUrl ? (
+                <img src={s.logoUrl} alt={s.name} className="w-4 h-4 rounded-full object-cover" />
+            ) : (
+                <span className={`w-2.5 h-2.5 rounded-full ${dotCls(s.id)}`}/>
+            )}
+            {s.name}
+          </button>
+        ))}
+        <div className="ml-auto flex items-center gap-2 text-xs font-semibold">
+          <span className="bg-green-100 text-green-700 px-2.5 py-1 rounded-lg border border-green-200">✓ มี {has}</span>
+          <span className="bg-red-100 text-red-500 px-2.5 py-1 rounded-lg border border-red-200">✗ ขาด {miss}</span>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+          <input value={q} onChange={handleSearch} placeholder="ค้นหาสินค้า..."
+            className="pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-sm bg-white shadow-sm focus:border-orange-400 focus:ring-1 focus:ring-orange-200 focus:outline-none w-52"/>
+        </div>
+        <div className="flex rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
+          {[['all','ทั้งหมด'],['missing','ขาดอยู่'],['has','มีแล้ว']].map(([v,l])=>(
+            <button key={v} onClick={()=>handleFilterChange(v)}
+              className={`px-3 py-1.5 text-xs font-bold border-r border-slate-100 last:border-0 transition-colors
+                ${f===v?'bg-slate-900 text-white':'text-slate-500 hover:bg-slate-50'}`}>{l}</button>
+          ))}
+        </div>
+        <span className="text-xs text-slate-400">{rows.length} รายการ · หน้า {page}/{total||1}</span>
+      </div>
+      <div className="card-grid">
+        {paged.map(sku=>(
+          <StoreCard key={sku.id} sku={sku} store={activeStoreObj} onSaveReq={onSaveReq}/>
+        ))}
+        {!paged.length && (
+          <div className="col-span-5 bg-white rounded-2xl border border-slate-100 py-16 text-center text-slate-400 text-sm">ไม่พบสินค้า</div>
+        )}
+      </div>
+
+      {total>1 && (
+        <div className="flex items-center justify-center gap-1.5 pt-2">
+          <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1}
+            className="w-9 h-9 rounded-xl border border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:border-orange-300 disabled:opacity-40 disabled:cursor-not-allowed">
+            <ChevronLeft size={15}/>
+          </button>
+          {Array.from({length:total},(_,i)=>i+1)
+            .filter(p=>p===1||p===total||Math.abs(p-page)<=1)
+            .reduce((a,p,i,arr)=>{if(i>0&&p-arr[i-1]>1)a.push('…');a.push(p);return a;},[])
+            .map((p,i)=>p==='…'
+              ?<span key={`e${i}`} className="w-9 h-9 flex items-center justify-center text-slate-400 text-xs">…</span>
+              :<button key={p} onClick={()=>setPage(p)}
+                  className={`w-9 h-9 rounded-xl text-xs font-bold transition-colors ${page===p?'bg-orange-500 text-white shadow-sm':'border border-slate-200 bg-white text-slate-600 hover:border-orange-300'}`}>{p}</button>
+            )}
+          <button onClick={()=>setPage(p=>Math.min(total,p+1))} disabled={page===total}
+            className="w-9 h-9 rounded-xl border border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:border-orange-300 disabled:opacity-40 disabled:cursor-not-allowed">
+            <ChevronRight size={15}/>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── SEEDING WORKFLOW MODAL ───────────────────────────────────────────────────
+function SeedModal({ sku, stores, onSave, onClose }) {
+  const defaultStoreId = stores.find(s => sku.storePrices[s.id]?.status === 'none')?.id || stores[0]?.id || '';
+  const [form, setForm] = useState({
+    name: sku.name,
+    brand: sku.brand || '',
+    store: defaultStoreId,
+    price: '',
+    unitQuantity: sku.baseItem?.unitQuantity || '1',
+    subUnit: sku.baseItem?.subUnit || sku.baseItem?.unitType || 'ชิ้น',
+    tags: sku.tags || ''
+  });
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.name || !form.store || !form.price) return;
+    setSaving(true);
+    await onSave(form);
+    setSaving(false);
+    onClose();
+  };
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden fade" onClick={e=>e.stopPropagation()}>
+        <div className="px-5 py-4 flex items-center gap-3 bg-indigo-600 text-white">
+          <Sprout size={20}/>
+          <div>
+            <div className="font-bold text-base">Seed ราคาใหม่</div>
+            <div className="text-xs text-indigo-200">เพิ่มราคาสินค้าที่ขาดในร้านต่างๆ</div>
+          </div>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="col-span-2">
+              <label className="block text-xs font-bold text-slate-500 mb-1">ชื่อสินค้า (Name) *</label>
+              <input value={form.name} onChange={e=>setForm({...form, name:e.target.value})} required
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">แบรนด์ (Brand)</label>
+              <input value={form.brand} onChange={e=>setForm({...form, brand:e.target.value})}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">ร้านค้า (Store) *</label>
+              <select value={form.store} onChange={e=>setForm({...form, store:e.target.value})} required
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none">
+                {stores.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">ราคา (Price) *</label>
+              <input type="number" step="0.01" value={form.price} onChange={e=>setForm({...form, price:e.target.value})} required
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none mono" />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">ปริมาณ (UnitQty)</label>
+                <input type="number" value={form.unitQuantity} onChange={e=>setForm({...form, unitQuantity:e.target.value})} required
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none text-center" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">หน่วย (SubUnit)</label>
+                <input value={form.subUnit} onChange={e=>setForm({...form, subUnit:e.target.value})} required
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+              </div>
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-bold text-slate-500 mb-1">แท็ก (Tags)</label>
+              <input value={form.tags} onChange={e=>setForm({...form, tags:e.target.value})} placeholder="คั่นด้วยลูกน้ำ เช่น tag1, tag2"
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+            </div>
+          </div>
+          <div className="flex gap-3 pt-3 border-t border-slate-100">
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-slate-500 border border-slate-200 bg-white hover:bg-slate-50">ยกเลิก</button>
+            <button type="submit" disabled={saving} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2">
+              <Sprout size={16}/> {saving ? 'กำลังบันทึก...' : 'Save Seed'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── SEED SKU VIEW ─────────────────────────────────────────────────────────────
+function SeedSkuView({ skus, stores, onSeedReq, onAddNewReq }) {
+  const [q,setQ] = useState('');
+  const [page,setPage] = useState(1);
+
+  const missingSkus = useMemo(()=>{
+    const t=q.toLowerCase().trim();
+    const filtered = skus.filter(s=>{
+      const hasMissing = stores.some(st => (s.storePrices[st.id]?.status || 'none') === 'none');
+      return hasMissing && (!t||s.name.toLowerCase().includes(t)||(s.brand||'').toLowerCase().includes(t));
+    });
+    return filtered.sort((a,b) => {
+        const m1 = stores.filter(st => (a.storePrices[st.id]?.status || 'none') === 'none').length;
+        const m2 = stores.filter(st => (b.storePrices[st.id]?.status || 'none') === 'none').length;
+        return m2 - m1;
+    });
+  },[skus,stores,q]);
+
+  const total = Math.ceil(missingSkus.length/PAGE);
+  const paged = missingSkus.slice((page-1)*PAGE, page*PAGE);
+
+  return (
+    <div className="fade space-y-4">
+      <div className="flex justify-between items-start gap-4">
+        <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-2xl flex gap-3 items-start shadow-sm flex-1">
+          <Sprout className="text-indigo-500 flex-shrink-0 mt-0.5" size={20}/>
+          <div>
+            <div className="font-bold text-indigo-900 text-sm">การทำงาน: Set up Main SKU (Seeding)</div>
+            <div className="text-indigo-700 text-xs mt-1 leading-relaxed">
+              หน้านี้จะแสดงเฉพาะสินค้าที่ขาดข้อมูลราคาในบางร้านค้า คลิกที่สินค้าเพื่อเปิดฟอร์ม Seed ราคาเพิ่มเติมตามรูปแบบ CSV
+            </div>
+          </div>
+        </div>
+        <button onClick={onAddNewReq} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3.5 rounded-2xl shadow-md shadow-indigo-200 flex items-center gap-2 font-bold text-sm whitespace-nowrap transition-all hover:-translate-y-0.5">
+          <Plus size={18} /> เพิ่มสินค้าใหม่
+        </button>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-xs">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+          <input value={q} onChange={e=>{setQ(e.target.value);setPage(1);}} placeholder="ค้นหาชื่อ / แบรนด์ สินค้าที่ขาด..."
+            className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-sm bg-white shadow-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 focus:outline-none"/>
+        </div>
+        <span className="text-xs text-slate-400">พบ {missingSkus.length} รายการที่ต้อง Seed · หน้า {page}/{total||1}</span>
+      </div>
+
+      <div className="space-y-3">
+        {paged.map((sku,i)=>(
+          <div key={sku.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex hover:border-indigo-300 transition-all hover:shadow-md cursor-pointer group" onClick={() => onSeedReq(sku)}>
+            <div className="w-56 bg-slate-50 border-r border-slate-100 p-3 flex flex-col items-center justify-center group-hover:bg-indigo-50 transition-colors">
+              <ImgBox w={200} h={200} src={sku.baseItem?.image || null}/>
+              <span className="text-[10px] font-bold text-red-500 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded text-center mt-2 flex items-center justify-center min-w-[50px]">ขาด {stores.filter(s=>(sku.storePrices[s.id]?.status||'none')==='none').length}</span>
+            </div>
+            <div className="flex-1 p-4">
+              <div className="text-slate-800 font-bold text-sm leading-snug line-clamp-2">{sku.name}</div>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-[11px] text-indigo-600 font-semibold bg-indigo-50 px-1.5 py-0.5 rounded-md border border-indigo-100">{sku.brand || 'No Brand'}</span>
+                <span className="text-[11px] text-slate-400">•</span>
+                <span className="text-[11px] text-slate-500 font-medium">{sku.unit}</span>
+              </div>
+              <div className="mt-3 flex gap-2 flex-wrap">
+                {stores.map(store => {
+                  const isMissing = (sku.storePrices[store.id]?.status || 'none') === 'none';
+                  return (
+                    <span key={store.id} className={`text-[10px] px-2 py-1 rounded-lg border font-bold ${isMissing ? 'bg-red-50 text-red-500 border-red-200' : 'bg-green-50 text-green-600 border-green-200'}`}>
+                      {store.name}: {isMissing ? 'ไม่มีข้อมูล' : '฿' + sku.storePrices[store.id].price}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="w-12 flex items-center justify-center text-slate-300 group-hover:text-indigo-500 transition-colors border-l border-slate-50">
+              <ChevronRight size={20}/>
+            </div>
+          </div>
+        ))}
+        {!paged.length && <div className="bg-white rounded-2xl border border-slate-100 py-16 text-center text-slate-400 text-sm">ไม่มีสินค้าที่ขาดข้อมูลในระบบ</div>}
+      </div>
+
+      {total>1 && (
+        <div className="flex items-center justify-center gap-1.5 pt-2">
+          <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1}
+            className="w-9 h-9 rounded-xl border border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:border-indigo-300 disabled:opacity-40 disabled:cursor-not-allowed">
+            <ChevronLeft size={15}/>
+          </button>
+          {Array.from({length:total},(_,i)=>i+1)
+            .filter(p=>p===1||p===total||Math.abs(p-page)<=1)
+            .reduce((a,p,i,arr)=>{if(i>0&&p-arr[i-1]>1)a.push('…');a.push(p);return a;},[])
+            .map((p,i)=>p==='…'
+              ?<span key={`e${i}`} className="w-9 h-9 flex items-center justify-center text-slate-400 text-xs">…</span>
+              :<button key={p} onClick={()=>setPage(p)}
+                  className={`w-9 h-9 rounded-xl text-xs font-bold transition-colors ${page===p?'bg-indigo-600 text-white shadow-sm':'border border-slate-200 bg-white text-slate-600 hover:border-indigo-300'}`}>{p}</button>
+            )}
+          <button onClick={()=>setPage(p=>Math.min(total,p+1))} disabled={page===total}
+            className="w-9 h-9 rounded-xl border border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:border-indigo-300 disabled:opacity-40 disabled:cursor-not-allowed">
+            <ChevronRight size={15}/>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── APP ───────────────────────────────────────────────────────────────────────
+function App() {
+  const [tab,setTab] = useState('seed');
+  const [items,setItems] = useState([]);
+  const [stores,setStores] = useState([]);
+  const [skus,setSkus] = useState([]);
+  const [seedTarget,setSeedTarget] = useState(null);
+  const [showAddSku,setShowAddSku] = useState(false);
+  const [confirm,setConfirm] = useState(null);
+  const [loadingItems, setLoadingItems] = useState(true);
+  const [loadingStores, setLoadingStores] = useState(true);
+
+  // Fetch stores dynamically
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "stores"), snapshot => {
+      const fbStores = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(s => !s.deleted);
+      setStores(fbStores);
+      setLoadingStores(false);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (loadingStores) return; // Wait for stores
+    const q = query(collection(db, "items"), orderBy("lastUpdated", "desc"));
+    const unsub = onSnapshot(q, (snapshot) => {
+        const fbItems = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(i => !i.deleted);
+        setItems(fbItems);
+        
+        const grouped = {};
+        fbItems.forEach(item => {
+            const name = item.name || 'Unknown';
+            if (!grouped[name]) {
+                grouped[name] = {
+                    id: item.id, // using first item's id for general id
+                    name: name,
+                    brand: item.brand || '',
+                    unit: `${item.unitQuantity || 1} ${item.subUnit || item.unitType || 'ชิ้น'}`,
+                    mainSku: name,
+                    tags: item.tags || '',
+                    storePrices: {},
+                    baseItem: item
+                };
+                stores.forEach(s => { grouped[name].storePrices[s.id] = { price: null, status: 'none' }; });
+            }
+            const storeId = item.store;
+            if (storeId && grouped[name].storePrices[storeId]) {
+                grouped[name].storePrices[storeId] = { price: item.price, status: 'active' };
+            }
+        });
+        setSkus(Object.values(grouped));
+        setLoadingItems(false);
+    });
+    return () => unsub();
+  }, [loadingStores, stores]);
+
+  const handleSaveSeed = async (seedData) => {
+      try {
+          const itemData = {
+              name: seedData.name,
+              brand: seedData.brand || '',
+              store: seedData.store,
+              price: parseFloat(seedData.price),
+              unitQuantity: seedData.unitQuantity || '1',
+              subUnit: seedData.subUnit || 'ชิ้น',
+              tags: seedData.tags || '',
+              status: 'active',
+              userId: 'ADMIN_SHEEP',
+              userDisplayName: 'ADMIN_SHEEP',
+              lastUpdated: Date.now()
+          };
+          
+          const existingItem = items.find(i => i.name === itemData.name && i.store === itemData.store);
+          if (existingItem) {
+              await updateDoc(doc(db, "items", existingItem.id), itemData);
+          } else {
+              await addDoc(collection(db, "items"), itemData);
+          }
+      } catch (err) {
+          alert('Error saving seed: ' + err.message);
+      }
+  };
+
+  const handleConfirmUpdate = async () => {
+    const {sku,store,newPrice} = confirm;
+    const itemData = {
+        name: sku.name,
+        brand: sku.brand || '',
+        store: store.id,
+        price: parseFloat(newPrice),
+        unitQuantity: sku.baseItem?.unitQuantity || '1',
+        subUnit: sku.baseItem?.subUnit || sku.baseItem?.unitType || 'ชิ้น',
+        tags: sku.tags || '',
+        status: 'active',
+        userId: 'ADMIN_SHEEP',
+        userDisplayName: 'ADMIN_SHEEP',
+        lastUpdated: Date.now()
+    };
+    try {
+        const existingItem = items.find(i => i.name === itemData.name && i.store === itemData.store);
+        if (existingItem) {
+            await updateDoc(doc(db, "items", existingItem.id), itemData);
+        } else {
+            await addDoc(collection(db, "items"), itemData);
+        }
+    } catch(e) {
+        alert(e);
+    }
+    setConfirm(null);
+  };
+
+  const handleAddNewSku = async (data) => {
+      try {
+          const itemData = {
+              ...data,
+              price: 0,
+              store: '',
+              status: 'catalog',
+              userId: 'ADMIN_SHEEP',
+              userDisplayName: 'ADMIN_SHEEP',
+              lastUpdated: Date.now()
+          };
+          await addDoc(collection(db, "items"), itemData);
+          setShowAddSku(false);
+      } catch (err) {
+          alert('Error adding new SKU: ' + err.message);
+      }
+  };
+
+  if (loadingItems || loadingStores) {
+      return <div className="min-h-screen flex items-center justify-center bg-slate-50"><div className="text-slate-400 font-bold flex items-center gap-2"><div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div> Loading Data...</div></div>;
+  }
+
+  return (
+    <div style={{minHeight:'100vh',background:'#f1f5f9'}}>
+      <header style={{background:'#0f172a'}} className="shadow-xl sticky top-0 z-40">
+        <div className="max-w-screen-xl mx-auto px-5 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-gradient-to-br from-indigo-500 to-indigo-600 shadow-lg shadow-indigo-500/30">
+                <Sprout size={20} color="#fff"/>
+              </div>
+              <div>
+                <div className="text-white font-bold text-sm">Seed Admin</div>
+                <div className="text-xs" style={{color:'rgba(255,255,255,.4)'}}>ระบบจัดการราคาสินค้า — Data Seeding</div>
+              </div>
+          </div>
+          <div className="flex items-center gap-3">
+              <div className="text-xs hidden sm:block" style={{color:'rgba(255,255,255,.3)'}}>
+                {skus.length} SKUs · {stores.length} Stores
+              </div>
+              <a href="priceadmin.html" className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-700 transition-colors">
+                  <ShieldCheck size={14} /> ไปยัง Dashboard
+              </a>
+          </div>
+        </div>
+      </header>
+
+      <div className="bg-white border-b border-slate-200 shadow-sm sticky top-[64px] z-30">
+        <div className="max-w-screen-xl mx-auto px-5 flex overflow-x-auto hide-scrollbar">
+          {[
+            {id:'seed', Icon:Sprout, label:'Set up Main SKU', sub:'จัดการและ Seed ราคาที่ขาด'},
+            {id:'sku', Icon:Package, label:'Main SKU View', sub:'กรอกราคาแต่ละร้านตาม SKU'},
+            {id:'store',Icon:Store,  label:'Store View',    sub:'ดูสินค้าที่ขาดในแต่ละร้าน'},
+          ].map(({id,Icon,label,sub})=>(
+            <button key={id} onClick={()=>setTab(id)}
+              className={`flex items-center gap-2.5 px-5 py-3.5 border-b-[3px] text-sm font-semibold transition-colors whitespace-nowrap
+                ${tab===id?(id==='seed'?'border-indigo-600 text-indigo-700':'border-orange-500 text-orange-600'):'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-200'}`}>
+              <Icon size={16}/>
+              <div className="text-left">
+                <div className="leading-none">{label}</div>
+                <div className={`text-[10px] font-normal mt-0.5 ${tab===id?(id==='seed'?'text-indigo-400':'text-orange-400'):'text-slate-400'}`}>{sub}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <main className="max-w-screen-xl mx-auto px-5 py-6 pb-20">
+        {tab==='seed' && <SeedSkuView skus={skus} stores={stores} onSeedReq={setSeedTarget} onAddNewReq={()=>setShowAddSku(true)}/>}
+        {tab==='sku'  && <MainSkuView skus={skus} stores={stores} onSaveReq={setConfirm}/>}
+        {tab==='store'&& <StoreView   skus={skus} stores={stores} onSaveReq={setConfirm}/>}
+      </main>
+
+      {showAddSku && <AddSkuModal onSave={handleAddNewSku} onClose={()=>setShowAddSku(false)} />}
+      {seedTarget && <SeedModal sku={seedTarget} stores={stores} onSave={handleSaveSeed} onClose={()=>setSeedTarget(null)}/>}
+      {confirm && <Confirm d={confirm} onOk={handleConfirmUpdate} onCancel={()=>setConfirm(null)}/>}
+    </div>
+  );
+}
+
+createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
