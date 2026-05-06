@@ -527,13 +527,132 @@
             );
         }
 
+        const BulkImageEditModal = ({ group, onClose, onSave }) => {
+            const [imgMode, setImgMode] = useState('url');
+            const [imageVal, setImageVal] = useState('');
+            const [isSaving, setIsSaving] = useState(false);
+            const [currentImage, setCurrentImage] = useState('');
+
+            useEffect(() => {
+                const masterItem = group.originalItems.find(i => i.image || i.masterImage);
+                const img = masterItem?.masterImage || masterItem?.image || '';
+                setCurrentImage(img);
+                
+                if (img && !img.startsWith('data:')) {
+                    setImageVal(img);
+                    setImgMode('url');
+                } else if (img && img.startsWith('data:')) {
+                    setImageVal('');
+                    setImgMode('upload');
+                }
+            }, [group]);
+
+            const handleImageUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const MAX_PIXELS = 1000000;
+                        let width = img.width;
+                        let height = img.height;
+                        let pixels = width * height;
+
+                        if (pixels > MAX_PIXELS) {
+                            const ratio = Math.sqrt(MAX_PIXELS / pixels);
+                            width = width * ratio;
+                            height = height * ratio;
+                        }
+
+                        const canvas = document.createElement('canvas');
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+                        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+                        setImageVal(dataUrl);
+                        setImgMode('upload');
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const handleSave = async () => {
+                setIsSaving(true);
+                try {
+                    await onSave(group, imageVal);
+                    onClose();
+                } catch (e) {
+                    alert('Error saving image: ' + e.message);
+                } finally {
+                    setIsSaving(false);
+                }
+            };
+
+            const hasChanged = imageVal !== currentImage;
+
+            return (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in" onClick={onClose}>
+                    <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-scale-in" onClick={e => e.stopPropagation()}>
+                        <div className="p-4 border-b border-gray-100 bg-slate-900 text-white flex justify-between items-center">
+                            <h2 className="text-base font-bold flex items-center gap-2"><Edit2 size={18} className="text-orange-400" /> แก้ไขรูปภาพรวม</h2>
+                            <button onClick={onClose} className="text-white/60 hover:text-white"><X size={20} /></button>
+                        </div>
+                        <div className="p-5 space-y-4">
+                            {currentImage && (
+                                <div className="flex flex-col items-center justify-center p-4 bg-gray-50 rounded-xl border border-gray-200">
+                                    <div className="w-20 h-20 bg-white rounded-lg border border-gray-200 p-1 flex items-center justify-center overflow-hidden mb-2 shadow-sm">
+                                        <img src={currentImage} className="max-w-full max-h-full object-contain" />
+                                    </div>
+                                    <div className="text-xs font-bold text-gray-500">รูปปัจจุบัน (ใช้ร่วมกัน {group.originalItems.length} SKU)</div>
+                                </div>
+                            )}
+
+                            <div className="border border-gray-200 rounded-lg overflow-hidden">
+                                <div className="flex bg-gray-50 border-b border-gray-200">
+                                    <button onClick={() => setImgMode('url')} className={`flex-1 py-2 text-xs font-bold ${imgMode === 'url' ? 'bg-white text-orange-600 border-b-2 border-orange-600' : 'text-gray-500 hover:bg-gray-100'}`}>วาง URL</button>
+                                    <button onClick={() => setImgMode('upload')} className={`flex-1 py-2 text-xs font-bold ${imgMode === 'upload' ? 'bg-white text-orange-600 border-b-2 border-orange-600' : 'text-gray-500 hover:bg-gray-100'}`}>อัปโหลดไฟล์</button>
+                                </div>
+                                <div className="p-4 flex items-center gap-3 bg-white">
+                                    {imgMode === 'url' ? (
+                                        <input value={imageVal && imageVal.startsWith('data:') ? '' : imageVal} onChange={e => setImageVal(e.target.value)} placeholder={currentImage && currentImage.startsWith('data:') ? "(รูปอัปโหลด)" : "https://..."} className="flex-1 w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:border-orange-500 focus:outline-none" />
+                                    ) : (
+                                        <div className="flex-1 w-full flex flex-col gap-2">
+                                            <input type="file" accept="image/*" onChange={handleImageUpload} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100" />
+                                            {imageVal && imageVal.startsWith('data:') && (
+                                                <div className="text-[10px] text-gray-400 font-medium ml-2">ขนาดไฟล์: ~{Math.round(imageVal.length * 0.75 / 1024)} KB</div>
+                                            )}
+                                        </div>
+                                    )}
+                                    {imageVal && imgMode === 'upload' && imageVal.startsWith('data:') && (
+                                        <div className="w-[60px] h-[60px] rounded border border-gray-200 bg-gray-50 flex items-center justify-center p-1 flex-shrink-0">
+                                            <img src={imageVal} className="max-w-full max-h-full object-contain" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                        <div className="p-4 border-t border-gray-100 bg-gray-50 flex gap-3">
+                            <button onClick={onClose} disabled={isSaving} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-gray-600 bg-white border border-gray-300 hover:bg-gray-50 transition-colors">ยกเลิก</button>
+                            <button onClick={handleSave} disabled={isSaving || !hasChanged} className={`flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-colors flex items-center justify-center gap-2 ${hasChanged && !isSaving ? 'bg-orange-600 hover:bg-orange-700' : 'bg-gray-300 cursor-not-allowed'}`}>
+                                {isSaving ? <span className="animate-pulse">กำลังอัปเดต {group.originalItems.length} รายการ...</span> : 'ยืนยันการเปลี่ยนแปลง'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
         /* ═══════════════════════════════════════════════════════════════
            MAIN APP
         ═══════════════════════════════════════════════════════════════ */
         function AdminApp() {
             const [deals, setDeals] = useState([]);
             const [searchQuery, setSearchQuery] = useState('');
-            const [editingId, setEditingId] = useState(null);
+            const [editingBulkImageGroup, setEditingBulkImageGroup] = useState(null);
             const [newImageUrl, setNewImageUrl] = useState('');
             const [editingDescId, setEditingDescId] = useState(null);
             const [newDesc, setNewDesc] = useState('');
@@ -989,10 +1108,10 @@
                 } catch (e) { alert("เกิดข้อผิดพลาด: " + e.message); }
             };
 
-            const handleSaveImage = async (dealGroup) => {
+            const handleSaveImage = async (dealGroup, newImgVal) => {
                 try {
-                    await Promise.all(dealGroup.originalItems.map(item => updateDoc(doc(db, "items", item.id), { masterImage: newImageUrl })));
-                    setEditingId(null); setNewImageUrl('');
+                    await Promise.all(dealGroup.originalItems.map(item => updateDoc(doc(db, "items", item.id), { masterImage: newImgVal, image: newImgVal })));
+                    showToast(`อัปเดตรูปภาพ ${dealGroup.originalItems.length} SKU เรียบร้อย`);
                 } catch (e) { alert("Failed to update image."); }
             };
 
@@ -3030,25 +3149,15 @@
                                                             )}
                                                             {adminTab === 'manage' && manageSubTab === 'edit' && (
                                                                 <td className="p-4">
-                                                                    {editingId === dealGroup.id ? (
-                                                                        <div className="flex flex-col gap-2">
-                                                                            <input type="text" value={newImageUrl} onChange={e => setNewImageUrl(e.target.value)} placeholder="วางลิงก์รูปภาพ..." autoFocus className="w-full text-xs p-2 border border-gray-300 rounded focus:border-orange-500 focus:outline-none" />
-                                                                            <div className="flex gap-2">
-                                                                                <button onClick={() => handleSaveImage(dealGroup)} className="flex-1 bg-green-500 text-white text-xs font-bold py-1.5 rounded hover:bg-green-600 flex justify-center items-center gap-1 shadow-sm"><Save size={12} /> บันทึก</button>
-                                                                                <button onClick={() => setEditingId(null)} className="flex-1 bg-gray-200 text-gray-700 text-xs font-bold py-1.5 rounded flex justify-center items-center gap-1"><X size={12} /> ยกเลิก</button>
-                                                                            </div>
-                                                                        </div>
-                                                                    ) : (
-                                                                        <div className="flex flex-col gap-2">
-                                                                            <button onClick={() => { setEditingId(dealGroup.id); setNewImageUrl(dealGroup.masterImage || ''); }}
-                                                                                className="w-full bg-white border border-gray-300 text-gray-700 text-xs font-bold py-2 rounded shadow-sm hover:bg-gray-50 flex items-center justify-center gap-2 transition-colors">
-                                                                                <Edit2 size={14} /> แก้ไขรูปภาพรวม
-                                                                            </button>
-                                                                            {dealGroup.masterImage && isDeleteMode && (
-                                                                                <button onClick={() => handleDeleteImage(dealGroup)} className="w-full text-red-500 text-xs font-bold py-1 hover:underline">ลบรูปภาพ</button>
-                                                                            )}
-                                                                        </div>
-                                                                    )}
+                                                                    <div className="flex flex-col gap-2">
+                                                                        <button onClick={() => setEditingBulkImageGroup(dealGroup)}
+                                                                            className="w-full bg-white border border-gray-300 text-gray-700 text-xs font-bold py-2 rounded shadow-sm hover:bg-gray-50 flex items-center justify-center gap-2 transition-colors">
+                                                                            <Edit2 size={14} /> แก้ไขรูปภาพรวม
+                                                                        </button>
+                                                                        {dealGroup.masterImage && isDeleteMode && (
+                                                                            <button onClick={() => handleDeleteImage(dealGroup)} className="w-full text-red-500 text-xs font-bold py-1 hover:underline">ลบรูปภาพ</button>
+                                                                        )}
+                                                                    </div>
                                                                 </td>
                                                             )}
                                                             {adminTab === 'manage' && manageSubTab === 'edit' && (
@@ -4708,6 +4817,13 @@
                                 </div>
                             );
                         })()}
+                        {editingBulkImageGroup && (
+                            <BulkImageEditModal
+                                group={editingBulkImageGroup}
+                                onClose={() => setEditingBulkImageGroup(null)}
+                                onSave={handleSaveImage}
+                            />
+                        )}
                     </main>
                 </div>
             );

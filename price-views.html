@@ -77,7 +77,7 @@
 <script type="text/babel" data-type="module">
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Package, Store, Search, ChevronLeft, ChevronRight, Check, X, Tag, ShoppingBag, AlertTriangle, Sprout, ShieldCheck, Plus } from 'lucide-react';
+import { Package, Store, Search, ChevronLeft, ChevronRight, Check, X, Tag, ShoppingBag, AlertTriangle, Sprout, ShieldCheck, Plus, Edit2 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, onSnapshot, query, orderBy, addDoc, updateDoc, doc } from 'firebase/firestore';
 
@@ -106,125 +106,337 @@ const ImgBox = ({w=200,h=200,r=10, src=null}) => (
 );
 
 // ── ADD SKU MODAL ─────────────────────────────────────────────────────────────
-function AddSkuModal({ onSave, onClose }) {
+function AddSkuModal({ editData, items, onSave, onClose }) {
+  const isEdit = !!editData;
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({
-    name: '', brand: '', category: '', unitType: '', subUnitCount: '', subUnit: '',
-    subUnitSize: '', subUnitSizeType: 'g', image: ''
+    masterProduct: editData?.masterProduct || '',
+    minorProduct: editData?.minorProduct || '',
+    name: editData?.name || '',
+    brand: editData?.brand || '',
+    category: editData?.category || '',
+    image: editData?.image || '',
+    size: editData?.size || '',
+    unitType: editData?.unitType || '',
+    subUnitCount: editData?.subUnitCount || '',
+    subUnit: editData?.subUnit || '',
+    weightVolume: editData?.weightVolume || '',
+    subUnitSizeType: editData?.subUnitSizeType || 'g',
+    barcode: editData?.barcode || ''
   });
+  const [imgMode, setImgMode] = useState(editData?.image && !editData.image.startsWith('data:') ? 'url' : 'upload');
   const [saving, setSaving] = useState(false);
+  const [relatedCount, setRelatedCount] = useState(0);
+
+  const slugify = (text) => {
+    return text.toString().toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^\w\u0E00-\u0E7F\-]+/g, '')
+      .replace(/\-\-+/g, '-')
+      .replace(/^-+/, '')
+      .replace(/-+$/, '');
+  };
+
+  const handleGenerateSlug = () => {
+    setForm({ ...form, masterProduct: slugify(form.name) });
+  };
+
+  const handleMasterProductBlur = () => {
+    if (!form.masterProduct) return;
+    const existing = items.find(i => i.masterProduct === form.masterProduct && i.id !== editData?.id && i.image);
+    if (existing && !form.image) {
+      setForm(f => ({ ...f, image: existing.image }));
+      setImgMode(existing.image.startsWith('data:') ? 'upload' : 'url');
+    }
+  };
+
+  useEffect(() => {
+    if (!form.masterProduct) {
+      setRelatedCount(0);
+      return;
+    }
+    const count = items.filter(i => i.masterProduct === form.masterProduct && i.id !== editData?.id).length;
+    setRelatedCount(count);
+  }, [form.masterProduct, form.image, items, editData]);
+
+  useEffect(() => {
+    if (editData) {
+      setForm({
+        masterProduct: editData.masterProduct || '',
+        minorProduct: editData.minorProduct || '',
+        name: editData.name || '',
+        brand: editData.brand || '',
+        category: editData.category || '',
+        image: editData.image || '',
+        size: editData.size || '',
+        unitType: editData.unitType || '',
+        subUnitCount: editData.subUnitCount || '',
+        subUnit: editData.subUnit || '',
+        weightVolume: editData.weightVolume || '',
+        subUnitSizeType: editData.subUnitSizeType || 'g',
+        barcode: editData.barcode || ''
+      });
+      setImgMode(editData.image && !editData.image.startsWith('data:') ? 'url' : 'upload');
+    }
+  }, [editData]);
+
+  const handleClose = () => {
+    const isDirty = Object.keys(form).some(key => {
+      let initialVal = editData?.[key] ?? '';
+      if (typeof initialVal === 'number') initialVal = String(initialVal);
+      return String(form[key]) !== String(initialVal);
+    });
+
+    if (isDirty) {
+      if (confirm("ยกเลิกการกรอกข้อมูล? ข้อมูลที่กรอกไว้จะหายทั้งหมด")) {
+        onClose();
+      }
+    } else {
+      onClose();
+    }
+  };
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX_PIXELS = 1000000;
+        let width = img.width;
+        let height = img.height;
+        let pixels = width * height;
+
+        if (pixels > MAX_PIXELS) {
+          const ratio = Math.sqrt(MAX_PIXELS / pixels);
+          width = width * ratio;
+          height = height * ratio;
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        setForm({ ...form, image: dataUrl });
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
 
   const handleNext = (e) => {
     e.preventDefault();
-    if (!form.name) return;
+    if (!form.name || !form.masterProduct || !form.unitType) return;
     setStep(2);
   };
 
   const handleSave = async () => {
     setSaving(true);
+    const relatedIds = (form.image !== editData?.image && relatedCount > 0) 
+        ? items.filter(i => i.masterProduct === form.masterProduct && i.id !== editData?.id).map(i => i.id) 
+        : [];
+        
     await onSave({
       ...form,
       subUnitCount: form.subUnitCount ? Number(form.subUnitCount) : null,
-      subUnitSize: form.subUnitSize ? Number(form.subUnitSize) : null,
-    });
+      size: form.size ? Number(form.size) : null,
+      weightVolume: form.weightVolume ? Number(form.weightVolume) : null,
+    }, relatedIds);
     setSaving(false);
   };
 
   return (
-    <div className="modal-bg" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden fade" onClick={e=>e.stopPropagation()}>
-        <div className="px-5 py-4 flex items-center gap-3 bg-indigo-600 text-white">
-          <Package size={20}/>
-          <div>
-            <div className="font-bold text-base">เพิ่มสินค้าใหม่ (Main SKU)</div>
-            <div className="text-xs text-indigo-200">สร้างรายการสินค้าเข้าสู่ Catalog หลัก</div>
+    <div className="modal-bg" style={{zIndex: 400}}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden fade flex flex-col" style={{maxHeight: '90vh'}} onClick={e=>e.stopPropagation()}>
+        <div className="px-5 py-4 flex items-center justify-between bg-indigo-600 text-white flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <Package size={20}/>
+            <div>
+              <div className="font-bold text-base">{isEdit ? 'แก้ไขสินค้า (Edit SKU)' : 'เพิ่มสินค้าใหม่ (Main SKU)'}</div>
+              <div className="text-xs text-indigo-200">{isEdit ? 'แก้ไขข้อมูลสินค้าใน Catalog' : 'สร้างรายการสินค้าเข้าสู่ Catalog หลัก'}</div>
+            </div>
           </div>
+          <button onClick={handleClose} className="text-white/60 hover:text-white transition-colors">
+            <X size={24} />
+          </button>
         </div>
         
         {step === 1 ? (
-          <form onSubmit={handleNext} className="p-5 space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="col-span-2">
-                <label className="block text-xs font-bold text-slate-500 mb-1">ชื่อสินค้า (Name) *</label>
-                <input value={form.name} onChange={e=>setForm({...form, name:e.target.value})} required autoFocus
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">ยี่ห้อ (Brand)</label>
-                <input value={form.brand} onChange={e=>setForm({...form, brand:e.target.value})}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">หมวดหมู่ (Category)</label>
-                <input value={form.category} onChange={e=>setForm({...form, category:e.target.value})}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">หน่วยหลัก (Unit Type)</label>
-                <input value={form.unitType} onChange={e=>setForm({...form, unitType:e.target.value})} placeholder="เช่น ซอง, แพ็ค"
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">จำนวนหน่วยย่อย (SubUnit Count)</label>
-                <input type="number" value={form.subUnitCount} onChange={e=>setForm({...form, subUnitCount:e.target.value})} placeholder="เช่น 1, 6, 12"
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">หน่วยย่อย (SubUnit)</label>
-                <input value={form.subUnit} onChange={e=>setForm({...form, subUnit:e.target.value})} placeholder="เช่น ซอง, ชิ้น"
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
-              </div>
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <label className="block text-xs font-bold text-slate-500 mb-1">ขนาด/น้ำหนัก</label>
-                  <input type="number" value={form.subUnitSize} onChange={e=>setForm({...form, subUnitSize:e.target.value})} placeholder="ตัวเลข"
+          <form onSubmit={handleNext} className="p-5 overflow-y-auto flex-1 space-y-6">
+            
+            {/* Group 1: ข้อมูลสินค้า */}
+            <div className="space-y-4">
+              <h3 className="text-sm font-bold text-slate-800 border-b border-slate-200 pb-1">1. ข้อมูลสินค้า</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2 sm:col-span-1">
+                  <label className="block text-xs font-bold text-slate-500 mb-1">ชื่อสินค้า* (Name)</label>
+                  <input value={form.name} onChange={e=>setForm({...form, name:e.target.value})} required autoFocus
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
                 </div>
-                <div className="w-20">
-                  <label className="block text-xs font-bold text-slate-500 mb-1">หน่วย</label>
-                  <select value={form.subUnitSizeType} onChange={e=>setForm({...form, subUnitSizeType:e.target.value})}
-                    className="w-full px-2 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none">
-                    <option value="g">g</option>
-                    <option value="ml">ml</option>
-                    <option value="kg">kg</option>
-                    <option value="l">l</option>
-                  </select>
+                <div className="col-span-2 sm:col-span-1">
+                  <label className="block text-xs font-bold text-slate-500 mb-1">MasterProduct*</label>
+                  <div className="flex gap-2">
+                    <input value={form.masterProduct} onChange={e=>setForm({...form, masterProduct:e.target.value})} onBlur={handleMasterProductBlur} required
+                      className="flex-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none min-w-0" />
+                    <button type="button" onClick={handleGenerateSlug} className="px-3 py-2 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded-lg text-sm font-semibold hover:bg-indigo-100 flex-shrink-0">
+                      Generate
+                    </button>
+                  </div>
+                </div>
+                <div className="col-span-2 sm:col-span-1">
+                  <label className="block text-xs font-bold text-slate-500 mb-1">MinorProduct</label>
+                  <input value={form.minorProduct} onChange={e=>setForm({...form, minorProduct:e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+                </div>
+                <div className="col-span-2 sm:col-span-1">
+                  <label className="block text-xs font-bold text-slate-500 mb-1">ยี่ห้อ (Brand)</label>
+                  <input value={form.brand} onChange={e=>setForm({...form, brand:e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+                </div>
+                <div className="col-span-2 sm:col-span-1">
+                  <label className="block text-xs font-bold text-slate-500 mb-1">หมวดหมู่ (Category)</label>
+                  <input value={form.category} onChange={e=>setForm({...form, category:e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+                </div>
+                <div className="col-span-2 sm:col-span-1">
+                  <label className="block text-xs font-bold text-slate-500 mb-1">BARCODE</label>
+                  <input value={form.barcode} onChange={e=>setForm({...form, barcode:e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
                 </div>
               </div>
-              <div className="col-span-2">
-                <label className="block text-xs font-bold text-slate-500 mb-1">รูปภาพ URL (Image) - เลือกได้</label>
-                <input value={form.image} onChange={e=>setForm({...form, image:e.target.value})} placeholder="https://..."
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+            </div>
+
+            {/* Group 2: บรรจุภัณฑ์ */}
+            <div className="space-y-4">
+              <h3 className="text-sm font-bold text-slate-800 border-b border-slate-200 pb-1">2. บรรจุภัณฑ์</h3>
+              <div className="space-y-3">
+                {/* Row A */}
+                <div className="flex gap-4">
+                  <div className="flex-1">
+                    <label className="block text-xs font-bold text-slate-500 mb-1">ขนาด</label>
+                    <input type="number" value={form.size} onChange={e=>setForm({...form, size:e.target.value})}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-xs font-bold text-slate-500 mb-1">หน่วยหลัก* (เช่น ซอง, แพ็ค)</label>
+                    <input value={form.unitType} onChange={e=>setForm({...form, unitType:e.target.value})} required
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+                  </div>
+                </div>
+                {/* Row B */}
+                <div className="flex gap-4">
+                  <div className="flex-1">
+                    <label className="block text-xs font-bold text-slate-500 mb-1">จำนวนในหน่วย</label>
+                    <input type="number" value={form.subUnitCount} onChange={e=>setForm({...form, subUnitCount:e.target.value})}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-xs font-bold text-slate-500 mb-1">หน่วยย่อย</label>
+                    <input value={form.subUnit} onChange={e=>setForm({...form, subUnit:e.target.value})}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+                  </div>
+                </div>
+                {/* Row C */}
+                <div className="flex gap-4">
+                  <div className="flex-[2]">
+                    <label className="block text-xs font-bold text-slate-500 mb-1">Weight/Volume</label>
+                    <input type="number" value={form.weightVolume} onChange={e=>setForm({...form, weightVolume:e.target.value})}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-xs font-bold text-slate-500 mb-1">หน่วยวัด</label>
+                    <select value={form.subUnitSizeType} onChange={e=>setForm({...form, subUnitSizeType:e.target.value})}
+                      className="w-full px-2 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none">
+                      <option value="g">g</option>
+                      <option value="ml">ml</option>
+                      <option value="kg">kg</option>
+                      <option value="l">l</option>
+                      <option value="ชิ้น">ชิ้น</option>
+                    </select>
+                  </div>
+                </div>
               </div>
             </div>
-            <div className="flex gap-3 pt-3 border-t border-slate-100">
-              <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-slate-500 border border-slate-200 bg-white hover:bg-slate-50">ยกเลิก</button>
+
+            {/* Group 3: รูปภาพ master */}
+            <div className="space-y-4">
+              <h3 className="text-sm font-bold text-slate-800 border-b border-slate-200 pb-1">3. รูปภาพ master</h3>
+              <div>
+                <div className="border border-slate-200 rounded-lg overflow-hidden">
+                  <div className="flex bg-slate-50 border-b border-slate-200">
+                    <button type="button" onClick={()=>setImgMode('url')} className={`flex-1 py-1.5 text-xs font-bold ${imgMode==='url'?'bg-white text-indigo-600 border-b-2 border-indigo-600':'text-slate-500 hover:bg-slate-100'}`}>วาง URL</button>
+                    <button type="button" onClick={()=>setImgMode('upload')} className={`flex-1 py-1.5 text-xs font-bold ${imgMode==='upload'?'bg-white text-indigo-600 border-b-2 border-indigo-600':'text-slate-500 hover:bg-slate-100'}`}>อัปโหลดไฟล์</button>
+                    <button type="button" onClick={()=>setForm({...form, image: ''})} className="px-3 py-1.5 text-xs font-bold text-red-500 hover:bg-red-50 border-l border-slate-200">ลบรูป</button>
+                  </div>
+                  <div className="p-3 flex items-center gap-3">
+                    {imgMode === 'url' ? (
+                      <input value={form.image} onChange={e=>setForm({...form, image:e.target.value})} placeholder="https://..."
+                        className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none" />
+                    ) : (
+                      <input type="file" accept="image/*" onChange={handleImageUpload}
+                        className="flex-1 w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100" />
+                    )}
+                    {form.image && (
+                      <div className="w-[60px] h-[60px] rounded border border-slate-200 overflow-hidden flex-shrink-0 bg-slate-50 flex items-center justify-center p-1">
+                        <img src={form.image} className="max-w-full max-h-full object-contain" alt="preview" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {form.image !== editData?.image && relatedCount > 0 && (
+                  <div className="text-xs text-indigo-600 mt-2 font-semibold">
+                    * อัปเดตรูปให้ {relatedCount} SKU ในกลุ่มนี้ด้วย
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-3 border-t border-slate-100 mt-4">
+              <button type="button" onClick={handleClose} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-slate-500 border border-slate-200 bg-white hover:bg-slate-50">ยกเลิก</button>
               <button type="submit" className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 flex items-center justify-center gap-2">
-                ส่งไปยัง Catalog MAIN SKU →
+                ไปหน้าสรุปเพื่อบันทึก →
               </button>
             </div>
           </form>
         ) : (
-          <div className="p-5 space-y-4 fade">
+          <div className="p-5 overflow-y-auto flex-1 space-y-4 fade">
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 text-sm space-y-2">
-              <div className="font-bold text-slate-800 border-b border-slate-200 pb-2 mb-2">สรุปข้อมูลสินค้า</div>
-              <div className="grid grid-cols-[100px_1fr] gap-1">
+              <div className="font-bold text-slate-800 border-b border-slate-200 pb-2 mb-2 flex gap-3 items-center">
+                 สรุปข้อมูลสินค้า
+                 {form.image && <img src={form.image} className="w-8 h-8 rounded border border-slate-200 object-contain bg-white ml-auto p-0.5"/>}
+              </div>
+              <div className="grid grid-cols-[110px_1fr] gap-1">
+                <span className="text-slate-500">MasterProduct:</span><span className="font-semibold">{form.masterProduct}</span>
                 <span className="text-slate-500">ชื่อสินค้า:</span><span className="font-semibold">{form.name}</span>
                 <span className="text-slate-500">ยี่ห้อ:</span><span className="font-semibold">{form.brand || '-'}</span>
                 <span className="text-slate-500">หมวดหมู่:</span><span className="font-semibold">{form.category || '-'}</span>
                 <span className="text-slate-500">หน่วยหลัก:</span><span className="font-semibold">{form.unitType || '-'}</span>
+                <span className="text-slate-500">ขนาด:</span><span className="font-semibold">{form.size || '-'}</span>
                 <span className="text-slate-500">จำนวนย่อย:</span><span className="font-semibold">{form.subUnitCount ? `${form.subUnitCount} ${form.subUnit}` : '-'}</span>
-                <span className="text-slate-500">ขนาด:</span><span className="font-semibold">{form.subUnitSize ? `${form.subUnitSize}${form.subUnitSizeType}` : '-'}</span>
+                <span className="text-slate-500">Weight/Vol:</span><span className="font-semibold">{form.weightVolume ? `${form.weightVolume}${form.subUnitSizeType}` : '-'}</span>
+                <span className="text-slate-500">Barcode:</span><span className="font-semibold">{form.barcode || '-'}</span>
               </div>
+              {form.image !== editData?.image && relatedCount > 0 && (
+                <div className="mt-2 text-indigo-600 text-xs font-semibold">
+                  * จะถูกนำไปอัปเดตรูปให้ {relatedCount} SKU อื่นๆ ใน MasterProduct เดียวกัน
+                </div>
+              )}
             </div>
 
-            <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-xl flex gap-3 text-yellow-800 text-xs">
-              <AlertTriangle className="flex-shrink-0 text-yellow-500" size={16}/>
-              <div className="leading-relaxed">
-                <strong>⚠️ สินค้านี้จะถูกเพิ่มเข้า Catalog เท่านั้น</strong><br/>
-                จะไม่แสดงบนหน้าหลักของแอพ จนกว่าจะมีราคาอย่างน้อย 1 ร้าน หากต้องการให้ผู้ใช้เห็น ให้กลับมา Seed ราคาในขั้นตอนถัดไป
+            {!isEdit && (
+              <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-xl flex gap-3 text-yellow-800 text-xs">
+                <AlertTriangle className="flex-shrink-0 text-yellow-500" size={16}/>
+                <div className="leading-relaxed">
+                  <strong>⚠️ สินค้านี้จะถูกเพิ่มเข้า Catalog เท่านั้น</strong><br/>
+                  จะไม่แสดงบนหน้าหลักของแอพ จนกว่าจะมีราคาอย่างน้อย 1 ร้าน หากต้องการให้ผู้ใช้เห็น ให้กลับมา Seed ราคาในขั้นตอนถัดไป
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="flex gap-3 pt-3 border-t border-slate-100">
               <button onClick={()=>setStep(1)} disabled={saving} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-slate-500 border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50">← แก้ไข</button>
@@ -234,6 +446,153 @@ function AddSkuModal({ onSave, onClose }) {
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── CSV IMPORT MODAL ─────────────────────────────────────────────────────────
+function CsvImportModal({ onImport, onClose }) {
+  const [csvText, setCsvText] = useState('');
+  const [rows, setRows] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [progress, setProgress] = useState(0);
+
+  const parseCSV = (text) => {
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+    const parsed = lines.map((line, i) => {
+      const cols = line.split(',');
+      return {
+        _rawIndex: i,
+        masterProduct: cols[0]?.trim() || '',
+        minorProduct: cols[1]?.trim() || '',
+        name: cols[2]?.trim() || '',
+        brand: cols[3]?.trim() || '',
+        category: cols[4]?.trim() || '',
+        store: cols[5]?.trim() || '',
+        image: cols[6]?.trim() || '',
+        size: cols[7]?.trim() || '',
+        unitType: cols[8]?.trim() || '',
+        subUnitCount: cols[9]?.trim() || '',
+        subUnit: cols[10]?.trim() || '',
+        weightVolume: cols[11]?.trim() || '',
+        subUnitSizeType: cols[12]?.trim() || 'g',
+        barcode: cols[13]?.trim() || ''
+      };
+    });
+    if (parsed.length > 0 && parsed[0].masterProduct.toLowerCase() === 'masterproduct') {
+      parsed.shift();
+    }
+    setRows(parsed);
+  };
+
+  useEffect(() => {
+    if (csvText) {
+      parseCSV(csvText);
+    } else {
+      setRows([]);
+    }
+  }, [csvText]);
+
+  const validRows = rows.filter(r => r.masterProduct && r.name && r.unitType);
+
+  const handleImport = async () => {
+    if (validRows.length === 0) return;
+    setSaving(true);
+    let count = 0;
+    for (const row of validRows) {
+      count++;
+      setProgress(count);
+      await onImport({
+        masterProduct: row.masterProduct,
+        minorProduct: row.minorProduct,
+        name: row.name,
+        brand: row.brand,
+        category: row.category,
+        store: row.store,
+        image: row.image,
+        size: row.size ? Number(row.size) : null,
+        unitType: row.unitType,
+        subUnitCount: row.subUnitCount ? Number(row.subUnitCount) : null,
+        subUnit: row.subUnit,
+        weightVolume: row.weightVolume ? Number(row.weightVolume) : null,
+        subUnitSizeType: row.subUnitSizeType || 'g',
+        barcode: row.barcode
+      });
+    }
+    setSaving(false);
+    onClose();
+  };
+
+  return (
+    <div className="modal-bg" onClick={onClose} style={{zIndex: 400}}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden fade flex flex-col" style={{maxHeight: '90vh'}} onClick={e=>e.stopPropagation()}>
+        <div className="px-5 py-4 flex items-center gap-3 bg-indigo-600 text-white flex-shrink-0">
+          <Package size={20}/>
+          <div>
+            <div className="font-bold text-base">นำเข้า CSV (Main SKU)</div>
+            <div className="text-xs text-indigo-200">ลำดับคอลัมน์: MasterProduct, MinorProduct, ชื่อสินค้า, ยี่ห้อ, หมวดหมู่, ร้านค้า, ลิงก์รูปmaster, ขนาด, หน่วยหลัก, จำนวนในหน่วย, หน่วยย่อย, Weight/Volume, หน่วยวัด, BARCODE</div>
+          </div>
+        </div>
+
+        <div className="p-5 flex-1 overflow-y-auto flex flex-col gap-4">
+          <textarea 
+            value={csvText} 
+            onChange={e => setCsvText(e.target.value)}
+            placeholder="วางข้อมูล CSV ที่นี่..."
+            className="w-full h-32 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none font-mono text-xs whitespace-pre"
+            disabled={saving}
+          />
+          
+          {rows.length > 0 && (
+            <div className="flex-1 min-h-[200px] border border-slate-200 rounded-lg overflow-hidden flex flex-col">
+              <div className="bg-slate-50 px-3 py-2 border-b border-slate-200 text-xs font-bold text-slate-600 flex justify-between">
+                <span>Preview ({validRows.length} valid / {rows.length} total)</span>
+                {rows.length > validRows.length && <span className="text-red-500">Highlight red = missing MasterProduct, ชื่อสินค้า or หน่วยหลัก</span>}
+              </div>
+              <div className="overflow-auto flex-1 max-h-[300px]">
+                <table className="w-full text-left text-xs whitespace-nowrap">
+                  <thead className="bg-slate-50 sticky top-0 shadow-sm">
+                    <tr>
+                      <th className="px-3 py-2 font-semibold border-b border-slate-200">#</th>
+                      <th className="px-3 py-2 font-semibold border-b border-slate-200">MasterProduct</th>
+                      <th className="px-3 py-2 font-semibold border-b border-slate-200">ชื่อสินค้า</th>
+                      <th className="px-3 py-2 font-semibold border-b border-slate-200">ร้านค้า</th>
+                      <th className="px-3 py-2 font-semibold border-b border-slate-200">ยี่ห้อ</th>
+                      <th className="px-3 py-2 font-semibold border-b border-slate-200">หน่วยหลัก</th>
+                      <th className="px-3 py-2 font-semibold border-b border-slate-200">Weight/Vol</th>
+                      <th className="px-3 py-2 font-semibold border-b border-slate-200">หน่วยวัด</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row, i) => {
+                      const valid = row.masterProduct && row.name && row.unitType;
+                      return (
+                        <tr key={i} className={`border-b border-slate-100 last:border-0 ${valid ? 'hover:bg-slate-50' : 'bg-red-50'}`}>
+                          <td className="px-3 py-1.5 text-slate-400">{i+1}</td>
+                          <td className={`px-3 py-1.5 ${!row.masterProduct ? 'text-red-500 font-bold' : ''}`}>{row.masterProduct || '-'}</td>
+                          <td className={`px-3 py-1.5 ${!row.name ? 'text-red-500 font-bold' : ''}`}>{row.name || '-'}</td>
+                          <td className="px-3 py-1.5">{row.store || '-'}</td>
+                          <td className="px-3 py-1.5">{row.brand}</td>
+                          <td className={`px-3 py-1.5 ${!row.unitType ? 'text-red-500 font-bold' : ''}`}>{row.unitType || '-'}</td>
+                          <td className="px-3 py-1.5">{row.weightVolume}</td>
+                          <td className="px-3 py-1.5">{row.subUnitSizeType}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 py-4 border-t border-slate-100 bg-slate-50 flex gap-3 flex-shrink-0">
+          <button type="button" onClick={onClose} disabled={saving} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-slate-500 border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-50">ยกเลิก</button>
+          <button type="button" onClick={handleImport} disabled={saving || validRows.length === 0} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 flex items-center justify-center gap-2 disabled:opacity-50">
+            {saving ? `กำลังบันทึก ${progress}/${validRows.length}...` : `นำเข้า ${validRows.length} รายการ`}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -325,7 +684,7 @@ function StorePriceRow({store,sp,onSave}) {
 }
 
 // ── SKU ROW ───────────────────────────────────────────────────────────────────
-function SkuRow({sku,stores,onSave,delay=0}) {
+function SkuRow({sku,stores,onSave,onEdit,delay=0}) {
   const missing = stores.filter(s=>sku.storePrices[s.id]?.status==='none').length;
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden sku-panel fade" style={{animationDelay:`${delay}s`}}>
@@ -335,12 +694,17 @@ function SkuRow({sku,stores,onSave,delay=0}) {
         {missing>0 && <span className="text-[10px] font-bold text-red-400 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-md">ขาด {missing} ร้าน</span>}
       </div>
       <div className="flex flex-col min-w-0">
-        <div className="px-4 py-2.5 border-b border-slate-100">
-          <div className="text-slate-800 font-semibold text-[13px] leading-snug line-clamp-2">{sku.name}</div>
-          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-            <span className="text-[11px] text-indigo-600 font-semibold bg-indigo-50 px-1.5 py-0.5 rounded-md border border-indigo-100">{sku.brand || 'No Brand'}</span>
-            <span className="text-[11px] text-slate-400">{sku.unit}</span>
+        <div className="px-4 py-2.5 border-b border-slate-100 flex items-start justify-between">
+          <div>
+            <div className="text-slate-800 font-semibold text-[13px] leading-snug line-clamp-2">{sku.name}</div>
+            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+              <span className="text-[11px] text-indigo-600 font-semibold bg-indigo-50 px-1.5 py-0.5 rounded-md border border-indigo-100">{sku.brand || 'No Brand'}</span>
+              <span className="text-[11px] text-slate-400">{sku.unit}</span>
+            </div>
           </div>
+          <button onClick={() => onEdit(sku.baseItem)} className="flex items-center gap-1 text-[11px] font-bold text-slate-400 hover:text-indigo-600 transition-colors px-2 py-1 rounded bg-slate-50 hover:bg-indigo-50 border border-slate-100 hover:border-indigo-200">
+            <Edit2 size={12}/> แก้ไข
+          </button>
         </div>
         <div className="store-row-grid" style={{background:'#1e293b'}}>
           <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider border-r border-slate-700" style={{color:'rgba(255,255,255,.4)'}}>ร้าน</div>
@@ -356,7 +720,7 @@ function SkuRow({sku,stores,onSave,delay=0}) {
 }
 
 // ── MAIN SKU VIEW ─────────────────────────────────────────────────────────────
-function MainSkuView({skus,stores,onSaveReq}) {
+function MainSkuView({skus,stores,onSaveReq,onEditReq}) {
   const [q,setQ] = useState('');
   const [page,setPage] = useState(1);
 
@@ -382,7 +746,8 @@ function MainSkuView({skus,stores,onSaveReq}) {
       <div className="space-y-3">
         {paged.map((sku,i)=>(
           <SkuRow key={sku.id} sku={sku} stores={stores} delay={i*0.025}
-            onSave={(sku,store,old,nw)=>onSaveReq({sku,store,oldPrice:old,newPrice:nw})}/>
+            onSave={(sku,store,old,nw)=>onSaveReq({sku,store,oldPrice:old,newPrice:nw})}
+            onEdit={onEditReq} />
         ))}
         {!paged.length && <div className="bg-white rounded-2xl border border-slate-100 py-16 text-center text-slate-400 text-sm">ไม่พบสินค้า</div>}
       </div>
@@ -582,7 +947,7 @@ function SeedModal({ sku, stores, onSave, onClose }) {
     e.preventDefault();
     if (!form.name || !form.store || !form.price) return;
     setSaving(true);
-    await onSave(form);
+    await onSave(form, sku);
     setSaving(false);
     onClose();
   };
@@ -652,7 +1017,7 @@ function SeedModal({ sku, stores, onSave, onClose }) {
 }
 
 // ── SEED SKU VIEW ─────────────────────────────────────────────────────────────
-function SeedSkuView({ skus, stores, onSeedReq, onAddNewReq }) {
+function SeedSkuView({ skus, stores, onSeedReq, onAddNewReq, onImportCsvReq }) {
   const [q,setQ] = useState('');
   const [page,setPage] = useState(1);
 
@@ -674,8 +1039,8 @@ function SeedSkuView({ skus, stores, onSeedReq, onAddNewReq }) {
 
   return (
     <div className="fade space-y-4">
-      <div className="flex justify-between items-start gap-4">
-        <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-2xl flex gap-3 items-start shadow-sm flex-1">
+      <div className="flex justify-between items-start gap-4 flex-wrap">
+        <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-2xl flex gap-3 items-start shadow-sm flex-1 min-w-[300px]">
           <Sprout className="text-indigo-500 flex-shrink-0 mt-0.5" size={20}/>
           <div>
             <div className="font-bold text-indigo-900 text-sm">การทำงาน: Set up Main SKU (Seeding)</div>
@@ -684,9 +1049,14 @@ function SeedSkuView({ skus, stores, onSeedReq, onAddNewReq }) {
             </div>
           </div>
         </div>
-        <button onClick={onAddNewReq} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3.5 rounded-2xl shadow-md shadow-indigo-200 flex items-center gap-2 font-bold text-sm whitespace-nowrap transition-all hover:-translate-y-0.5">
-          <Plus size={18} /> เพิ่มสินค้าใหม่
-        </button>
+        <div className="flex gap-2">
+          <button onClick={onImportCsvReq} className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-5 py-3.5 rounded-2xl shadow-sm flex items-center gap-2 font-bold text-sm whitespace-nowrap transition-all hover:-translate-y-0.5">
+            นำเข้า CSV
+          </button>
+          <button onClick={onAddNewReq} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3.5 rounded-2xl shadow-md shadow-indigo-200 flex items-center gap-2 font-bold text-sm whitespace-nowrap transition-all hover:-translate-y-0.5">
+            <Plus size={18} /> เพิ่มสินค้าใหม่
+          </button>
+        </div>
       </div>
 
       <div className="flex items-center gap-3">
@@ -763,6 +1133,8 @@ function App() {
   const [skus,setSkus] = useState([]);
   const [seedTarget,setSeedTarget] = useState(null);
   const [showAddSku,setShowAddSku] = useState(false);
+  const [editingSku,setEditingSku] = useState(null);
+  const [showCsvImport,setShowCsvImport] = useState(false);
   const [confirm,setConfirm] = useState(null);
   const [loadingItems, setLoadingItems] = useState(true);
   const [loadingStores, setLoadingStores] = useState(true);
@@ -811,17 +1183,24 @@ function App() {
     return () => unsub();
   }, [loadingStores, stores]);
 
-  const handleSaveSeed = async (seedData) => {
+  const handleSaveSeed = async (seedData, sku) => {
       try {
+          const priceVal = parseFloat(seedData.price) || 0;
+          const statusVal = (priceVal > 0 && seedData.store) ? 'active' : 'catalog';
+
+          const masterItem = items.find(i => i.masterProduct === sku?.baseItem?.masterProduct && i.image);
+          const inheritedImage = sku?.baseItem?.image || masterItem?.image || '';
+
           const itemData = {
               name: seedData.name,
               brand: seedData.brand || '',
               store: seedData.store,
-              price: parseFloat(seedData.price),
+              price: priceVal,
               unitQuantity: seedData.unitQuantity || '1',
               subUnit: seedData.subUnit || 'ชิ้น',
               tags: seedData.tags || '',
-              status: 'active',
+              image: inheritedImage,
+              status: statusVal,
               userId: 'ADMIN_SHEEP',
               userDisplayName: 'ADMIN_SHEEP',
               lastUpdated: Date.now()
@@ -840,21 +1219,28 @@ function App() {
 
   const handleConfirmUpdate = async () => {
     const {sku,store,newPrice} = confirm;
+    const priceVal = parseFloat(newPrice) || 0;
+    const statusVal = (priceVal > 0 && store.id) ? 'active' : 'catalog';
+
+    const masterItem = items.find(i => i.masterProduct === sku?.baseItem?.masterProduct && i.image);
+    const inheritedImage = sku?.baseItem?.image || masterItem?.image || '';
+
     const itemData = {
         name: sku.name,
         brand: sku.brand || '',
         store: store.id,
-        price: parseFloat(newPrice),
+        price: priceVal,
         unitQuantity: sku.baseItem?.unitQuantity || '1',
         subUnit: sku.baseItem?.subUnit || sku.baseItem?.unitType || 'ชิ้น',
         tags: sku.tags || '',
-        status: 'active',
+        image: inheritedImage,
+        status: statusVal,
         userId: 'ADMIN_SHEEP',
         userDisplayName: 'ADMIN_SHEEP',
         lastUpdated: Date.now()
     };
     try {
-        const existingItem = items.find(i => i.name === itemData.name && i.store === itemData.store);
+        const existingItem = items.find(i => i.name === itemData.name && i.store === store.id);
         if (existingItem) {
             await updateDoc(doc(db, "items", existingItem.id), itemData);
         } else {
@@ -866,10 +1252,43 @@ function App() {
     setConfirm(null);
   };
 
-  const handleAddNewSku = async (data) => {
+  const handleAddNewSku = async (data, relatedIds) => {
+      try {
+          if (editingSku) {
+              await updateDoc(doc(db, "items", editingSku.id), data);
+              if (relatedIds && relatedIds.length > 0) {
+                  for (let id of relatedIds) {
+                      await updateDoc(doc(db, "items", id), { image: data.image });
+                  }
+              }
+              setEditingSku(null);
+          } else {
+              const itemData = {
+                  ...data,
+                  price: 0,
+                  store: '',
+                  status: 'catalog',
+                  userId: 'ADMIN_SHEEP',
+                  userDisplayName: 'ADMIN_SHEEP',
+                  lastUpdated: Date.now()
+              };
+              await addDoc(collection(db, "items"), itemData);
+              if (relatedIds && relatedIds.length > 0) {
+                  for (let id of relatedIds) {
+                      await updateDoc(doc(db, "items", id), { image: data.image });
+                  }
+              }
+              setShowAddSku(false);
+          }
+      } catch (err) {
+          alert('Error saving SKU: ' + err.message);
+      }
+  };
+
+  const handleImportCsv = async (row) => {
       try {
           const itemData = {
-              ...data,
+              ...row,
               price: 0,
               store: '',
               status: 'catalog',
@@ -878,9 +1297,8 @@ function App() {
               lastUpdated: Date.now()
           };
           await addDoc(collection(db, "items"), itemData);
-          setShowAddSku(false);
       } catch (err) {
-          alert('Error adding new SKU: ' + err.message);
+          console.error('Error importing CSV row:', err);
       }
   };
 
@@ -933,12 +1351,13 @@ function App() {
       </div>
 
       <main className="max-w-screen-xl mx-auto px-5 py-6 pb-20">
-        {tab==='seed' && <SeedSkuView skus={skus} stores={stores} onSeedReq={setSeedTarget} onAddNewReq={()=>setShowAddSku(true)}/>}
-        {tab==='sku'  && <MainSkuView skus={skus} stores={stores} onSaveReq={setConfirm}/>}
+        {tab==='seed' && <SeedSkuView skus={skus} stores={stores} onSeedReq={setSeedTarget} onAddNewReq={()=>setShowAddSku(true)} onImportCsvReq={()=>setShowCsvImport(true)}/>}
+        {tab==='sku'  && <MainSkuView skus={skus} stores={stores} onSaveReq={setConfirm} onEditReq={(s) => setEditingSku(s)}/>}
         {tab==='store'&& <StoreView   skus={skus} stores={stores} onSaveReq={setConfirm}/>}
       </main>
 
-      {showAddSku && <AddSkuModal onSave={handleAddNewSku} onClose={()=>setShowAddSku(false)} />}
+      {(showAddSku || editingSku) && <AddSkuModal editData={editingSku} items={items} onSave={handleAddNewSku} onClose={()=>{setShowAddSku(false);setEditingSku(null);}} />}
+      {showCsvImport && <CsvImportModal onImport={handleImportCsv} onClose={()=>setShowCsvImport(false)} />}
       {seedTarget && <SeedModal sku={seedTarget} stores={stores} onSave={handleSaveSeed} onClose={()=>setSeedTarget(null)}/>}
       {confirm && <Confirm d={confirm} onOk={handleConfirmUpdate} onCancel={()=>setConfirm(null)}/>}
     </div>

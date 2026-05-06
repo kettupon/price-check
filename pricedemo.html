@@ -171,6 +171,17 @@
         const auth = getAuth(app);
         const storage = getStorage(app);
         const googleProvider = new GoogleAuthProvider();
+
+        const ensureAuth = async () => {
+            if (auth.currentUser) return auth.currentUser;
+            try {
+                const result = await signInAnonymously(auth);
+                return result.user;
+            } catch (error) {
+                window.dispatchEvent(new CustomEvent('showGlobalToast', { detail: 'กรุณาลองใหม่อีกครั้ง' }));
+                return null;
+            }
+        };
         const UNIT_OPTIONS = {
             volume: ['ml', 'ลิตร', 'L', 'cc'],
             weight: ['g', 'กรัม', 'kg', 'กิโลกรัม'],
@@ -216,8 +227,9 @@
             }, [currentUser]);
 
             const saveProfile = async (data) => {
-                if (!currentUser) return;
-                await setDoc(doc(db, 'users', currentUser.uid), {
+                const activeUser = await ensureAuth();
+                if (!activeUser) return;
+                await setDoc(doc(db, 'users', activeUser.uid), {
                     ...data,
                     updatedAt: Date.now(),
                     ...(!profile?.createdAt ? { createdAt: Date.now() } : {})
@@ -245,7 +257,9 @@
             }, [itemId, currentUser]);
 
             const toggleLike = async () => {
-                if (!currentUser || currentUser.isAnonymous) {
+                const activeUser = await ensureAuth();
+                if (!activeUser) return;
+                if (activeUser.isAnonymous) {
                     setShowLoginModal(true);
                     return;
                 }
@@ -254,15 +268,15 @@
                 setIsLiked(!prevLiked);
                 setCount(prevCount + (prevLiked ? -1 : 1));
                 try {
-                    const itemLikeRef = doc(db, "items", itemId, "likes", currentUser.uid);
-                    const userLikeRef = doc(db, "users", currentUser.uid, "likedItems", itemId);
+                    const itemLikeRef = doc(db, "items", itemId, "likes", activeUser.uid);
+                    const userLikeRef = doc(db, "users", activeUser.uid, "likedItems", itemId);
                     if (prevLiked) {
                         await deleteDoc(itemLikeRef);
                         await deleteDoc(userLikeRef);
                     } else {
                         const likeData = {
                             likedAt: new Date().toISOString(),
-                            userId: currentUser.uid,
+                            userId: activeUser.uid,
                             itemId: itemId
                         };
                         await setDoc(itemLikeRef, likeData);
@@ -340,11 +354,8 @@
             }, [itemId]);
 
             const addComment = async (text) => {
-                // LAZY_AUTH_GATE
-                if (!auth.currentUser) {
-                    await signInAnonymously(auth);
-                }
-                const activeUser = auth.currentUser;
+                const activeUser = await ensureAuth();
+                if (!activeUser) return;
 
                 try {
                     await addDoc(collection(db, "items", itemId, "comments"), {
@@ -452,8 +463,10 @@
                 setSubmitting(false);
             };
 
-            const handleReportComment = (c) => {
-                if (!currentUser || currentUser.isAnonymous) {
+            const handleReportComment = async (c) => {
+                const activeUser = await ensureAuth();
+                if (!activeUser) return;
+                if (activeUser.isAnonymous) {
                     setShowLoginModal(true);
                     return;
                 }
@@ -1127,6 +1140,12 @@
             const [isSubmittingPostReport, setIsSubmittingPostReport] = useState(false);
             const [toastMessage, setToastMessage] = useState(null);
 
+            useEffect(() => {
+                const handleGlobalToast = (e) => setToastMessage(e.detail);
+                window.addEventListener('showGlobalToast', handleGlobalToast);
+                return () => window.removeEventListener('showGlobalToast', handleGlobalToast);
+            }, []);
+
             // ── Lazy Auth & Top Toast state ──
             const [showTopToast, setShowTopToast] = useState(false);
             const [topToastMessage, setTopToastMessage] = useState({ title: '', isSuccess: false });
@@ -1167,11 +1186,8 @@
             });
 
             const handleSubmitTipoff = async () => {
-                // LAZY_AUTH_GATE
-                if (!auth.currentUser) {
-                    await signInAnonymously(auth);
-                }
-                const activeUser = auth.currentUser;
+                const activeUser = await ensureAuth();
+                if (!activeUser) return;
 
                 if (tipoffImages.length === 0) { alert('กรุณาถ่ายหรือเลือกรูปอย่างน้อย 1 รูป'); return; }
                 setIsSubmittingTipoff(true);
@@ -1722,11 +1738,8 @@
             };
 
             const handleSubmitReport = async () => {
-                // LAZY_AUTH_GATE
-                if (!auth.currentUser) {
-                    await signInAnonymously(auth);
-                }
-                const activeUser = auth.currentUser;
+                const activeUser = await ensureAuth();
+                if (!activeUser) return;
 
                 if (!reportText.trim() && reportImages.length === 0) {
                     alert('กรุณากรอกข้อความหรือแนบรูปภาพรายงานปัญหา');
@@ -1819,11 +1832,8 @@
             };
 
             const executeSaveDeal = async () => {
-                // LAZY_AUTH_GATE
-                if (!auth.currentUser) {
-                    await signInAnonymously(auth);
-                }
-                const activeUser = auth.currentUser;
+                const activeUser = await ensureAuth();
+                if (!activeUser) return;
 
                 try {
                     const docRef = await addDoc(collection(db, "items"), {
