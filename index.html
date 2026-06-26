@@ -137,7 +137,7 @@
         }
       }
     </script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.26.10/babel.min.js"></script>
 </head>
 
 <body class="bg-stone-100">
@@ -171,6 +171,17 @@
         const auth = getAuth(app);
         const storage = getStorage(app);
         const googleProvider = new GoogleAuthProvider();
+
+        const ensureAuth = async () => {
+            if (auth.currentUser) return auth.currentUser;
+            try {
+                const result = await signInAnonymously(auth);
+                return result.user;
+            } catch (error) {
+                window.dispatchEvent(new CustomEvent('showGlobalToast', { detail: 'กรุณาลองใหม่อีกครั้ง' }));
+                return null;
+            }
+        };
         const UNIT_OPTIONS = {
             volume: ['ml', 'ลิตร', 'L', 'cc'],
             weight: ['g', 'กรัม', 'kg', 'กิโลกรัม'],
@@ -216,8 +227,9 @@
             }, [currentUser]);
 
             const saveProfile = async (data) => {
-                if (!currentUser) return;
-                await setDoc(doc(db, 'users', currentUser.uid), {
+                const activeUser = await ensureAuth();
+                if (!activeUser) return;
+                await setDoc(doc(db, 'users', activeUser.uid), {
                     ...data,
                     updatedAt: Date.now(),
                     ...(!profile?.createdAt ? { createdAt: Date.now() } : {})
@@ -245,7 +257,9 @@
             }, [itemId, currentUser]);
 
             const toggleLike = async () => {
-                if (!currentUser || currentUser.isAnonymous) {
+                const activeUser = await ensureAuth();
+                if (!activeUser) return;
+                if (activeUser.isAnonymous) {
                     setShowLoginModal(true);
                     return;
                 }
@@ -254,15 +268,15 @@
                 setIsLiked(!prevLiked);
                 setCount(prevCount + (prevLiked ? -1 : 1));
                 try {
-                    const itemLikeRef = doc(db, "items", itemId, "likes", currentUser.uid);
-                    const userLikeRef = doc(db, "users", currentUser.uid, "likedItems", itemId);
+                    const itemLikeRef = doc(db, "items", itemId, "likes", activeUser.uid);
+                    const userLikeRef = doc(db, "users", activeUser.uid, "likedItems", itemId);
                     if (prevLiked) {
                         await deleteDoc(itemLikeRef);
                         await deleteDoc(userLikeRef);
                     } else {
                         const likeData = {
                             likedAt: new Date().toISOString(),
-                            userId: currentUser.uid,
+                            userId: activeUser.uid,
                             itemId: itemId
                         };
                         await setDoc(itemLikeRef, likeData);
@@ -340,11 +354,8 @@
             }, [itemId]);
 
             const addComment = async (text) => {
-                // LAZY_AUTH_GATE
-                if (!auth.currentUser) {
-                    await signInAnonymously(auth);
-                }
-                const activeUser = auth.currentUser;
+                const activeUser = await ensureAuth();
+                if (!activeUser) return;
 
                 try {
                     await addDoc(collection(db, "items", itemId, "comments"), {
@@ -452,8 +463,10 @@
                 setSubmitting(false);
             };
 
-            const handleReportComment = (c) => {
-                if (!currentUser || currentUser.isAnonymous) {
+            const handleReportComment = async (c) => {
+                const activeUser = await ensureAuth();
+                if (!activeUser) return;
+                if (activeUser.isAnonymous) {
                     setShowLoginModal(true);
                     return;
                 }
@@ -1043,7 +1056,14 @@
             const [currentView, setCurrentView] = useState('feed');
             const [showShippingInFeed, setShowShippingInFeed] = useState(false);
             const [showVolumeInFeed, setShowVolumeInFeed] = useState(false);
-            const [pdpaAccepted, setPdpaAccepted] = useState(() => localStorage.getItem('pdpa_consent') === 'true');
+            const [pdpaAccepted, setPdpaAccepted] = useState(() => {
+                try {
+                    return localStorage.getItem('pdpa_consent') === 'true';
+                } catch (e) {
+                    console.warn('localStorage is not available:', e);
+                    return false;
+                }
+            });
             const [profileTab, setProfileTab] = useState('posts');
             const [adminNews, setAdminNews] = useState([]); // ── NEW: admin news from Firebase
             const [viewedNewsIds, setViewedNewsIds] = useState([]); // ── NEW: track viewed news
@@ -1127,6 +1147,12 @@
             const [isSubmittingPostReport, setIsSubmittingPostReport] = useState(false);
             const [toastMessage, setToastMessage] = useState(null);
 
+            useEffect(() => {
+                const handleGlobalToast = (e) => setToastMessage(e.detail);
+                window.addEventListener('showGlobalToast', handleGlobalToast);
+                return () => window.removeEventListener('showGlobalToast', handleGlobalToast);
+            }, []);
+
             // ── Lazy Auth & Top Toast state ──
             const [showTopToast, setShowTopToast] = useState(false);
             const [topToastMessage, setTopToastMessage] = useState({ title: '', isSuccess: false });
@@ -1167,11 +1193,8 @@
             });
 
             const handleSubmitTipoff = async () => {
-                // LAZY_AUTH_GATE
-                if (!auth.currentUser) {
-                    await signInAnonymously(auth);
-                }
-                const activeUser = auth.currentUser;
+                const activeUser = await ensureAuth();
+                if (!activeUser) return;
 
                 if (tipoffImages.length === 0) { alert('กรุณาถ่ายหรือเลือกรูปอย่างน้อย 1 รูป'); return; }
                 setIsSubmittingTipoff(true);
@@ -1531,9 +1554,15 @@
                                 userDisplayName: data.userDisplayName || 'ผู้ใช้',
                                 userPhotoURL: data.userPhotoURL || null,
                                 status: data.status || "active",
-                                lastUpdated: data.lastUpdated || Date.now()
+                                lastUpdated: data.lastUpdated || Date.now(),
+                                store: data.store
                             };
-                        });
+                        })
+                        .filter(item => 
+                            item.status !== 'catalog' &&
+                            item.store && item.store !== '' &&
+                            item.price && parseFloat(item.price) > 0
+                        );
                     setDeals(fbDeals);
                     if (!feedLoaded) setFeedLoaded(true);
 
@@ -1716,11 +1745,8 @@
             };
 
             const handleSubmitReport = async () => {
-                // LAZY_AUTH_GATE
-                if (!auth.currentUser) {
-                    await signInAnonymously(auth);
-                }
-                const activeUser = auth.currentUser;
+                const activeUser = await ensureAuth();
+                if (!activeUser) return;
 
                 if (!reportText.trim() && reportImages.length === 0) {
                     alert('กรุณากรอกข้อความหรือแนบรูปภาพรายงานปัญหา');
@@ -1813,11 +1839,8 @@
             };
 
             const executeSaveDeal = async () => {
-                // LAZY_AUTH_GATE
-                if (!auth.currentUser) {
-                    await signInAnonymously(auth);
-                }
-                const activeUser = auth.currentUser;
+                const activeUser = await ensureAuth();
+                if (!activeUser) return;
 
                 try {
                     const docRef = await addDoc(collection(db, "items"), {
@@ -2525,13 +2548,6 @@
                                         : 'bg-white text-gray-600 border border-gray-200 hover:bg-purple-50 hover:text-purple-600 hover:border-purple-200'}`}>
                                     <Tag size={11} /> ค้นหายี่ห้อ
                                 </button>
-                                <button
-                                    onClick={() => { setSearchFilterMode('shop'); setActiveCategoryFilter(null); setActiveBrandFilter(null); }}
-                                    className={`whitespace-nowrap flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold transition-all flex-shrink-0 ${searchFilterMode === 'shop'
-                                        ? 'bg-green-600 text-white shadow-sm shadow-green-200'
-                                        : 'bg-white text-gray-600 border border-gray-200 hover:bg-green-50 hover:text-green-600 hover:border-green-200'}`}>
-                                    <Store size={11} /> ค้นหาร้านค้า
-                                </button>
                             </div>
 
                             {/* ── Category chips (shown in category mode) ── */}
@@ -2570,27 +2586,6 @@
                                                 <Tag size={11} /> {brand}
                                                 <span className={`text-[9px] px-1 py-0.5 rounded-full ml-0.5 font-bold bg-gray-100 text-gray-400`}>
                                                     {deals.filter(d => d.brand === brand).length}
-                                                </span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                ) : null;
-                            })()}
-
-                            {/* ── Shop chips (shown in shop mode) ── */}
-                            {searchFilterMode === 'shop' && (() => {
-                                const q = (searchQuery || '').trim().toLowerCase();
-                                const filtered = q ? stores.filter(s => (s.name || s.id || '').toLowerCase().includes(q)) : stores;
-                                return filtered.length > 0 ? (
-                                    <div className="flex gap-2 overflow-x-auto hide-scrollbar mt-2 pb-0.5">
-                                        {filtered.map(store => (
-                                            <button
-                                                key={store.id}
-                                                onClick={() => { setSelectedStoreForDetail(store); setCurrentView('store_detail'); }}
-                                                className={`whitespace-nowrap flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold transition-all flex-shrink-0 bg-white text-gray-600 border border-gray-200 hover:bg-green-50 hover:text-green-600 hover:border-green-200`}>
-                                                <Store size={11} /> {store.name || store.id}
-                                                <span className={`text-[9px] px-1 py-0.5 rounded-full ml-0.5 font-bold bg-gray-100 text-gray-400`}>
-                                                    {getStoreDeals(store.id).length}
                                                 </span>
                                             </button>
                                         ))}
@@ -3624,7 +3619,7 @@
                                 <div className="flex-1 min-w-0 flex items-center gap-3">
                                     <StoreLogo storeId={storeId} size="md" />
                                     <div className="min-w-0">
-                                        <div className="flex items-center gap-2"><h2 className="text-lg font-bold text-gray-800 truncate">{selectedStoreForDetail.name || storeId}</h2></div>
+                                        <div className="flex items-center gap-2"><h2 className="text-lg font-bold text-gray-800 truncate">{storeId}</h2></div>
                                         {selectedStoreForDetail.province && <div className="text-xs text-gray-400 flex items-center gap-1 mt-0.5"><MapPin size={10} /> {selectedStoreForDetail.province}</div>}
                                     </div>
                                 </div>
@@ -3632,7 +3627,7 @@
                             </div>
                             <div className="px-4 pb-3">
                                 <div className="relative">
-                                    <input type="text" placeholder={`ค้นหาสินค้าใน ${selectedStoreForDetail.name || storeId}...`} value={storeSearchQuery} onChange={(e) => setStoreSearchQuery(e.target.value)}
+                                    <input type="text" placeholder={`ค้นหาสินค้าใน ${storeId}...`} value={storeSearchQuery} onChange={(e) => setStoreSearchQuery(e.target.value)}
                                         className="w-full py-2.5 pl-9 pr-4 bg-gray-50 rounded-xl text-sm font-medium text-gray-800 focus:outline-none border-2 border-transparent focus:border-orange-500 transition-colors" />
                                     <Search className="absolute left-3 top-3 text-gray-400" size={15} />
                                     {storeSearchQuery && <button onClick={() => setStoreSearchQuery('')} className="absolute right-3 top-3 text-gray-400"><X size={15} /></button>}
@@ -3908,7 +3903,14 @@
                                         </div>
                                     </div>
                                     <button
-                                        onClick={() => { localStorage.setItem('pdpa_consent', 'true'); setPdpaAccepted(true); }}
+                                        onClick={() => {
+                                            try {
+                                                localStorage.setItem('pdpa_consent', 'true');
+                                            } catch (e) {
+                                                console.warn('Failed to save pdpa_consent:', e);
+                                            }
+                                            setPdpaAccepted(true);
+                                        }}
                                         className="w-full py-2.5 bg-green-500 hover:bg-green-600 text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98] shadow-md shadow-green-100"
                                     >
                                         ตกลงและยอมรับ
