@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Price Admin Dashboard</title>
+    <meta name="makro-api-base" content="">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -77,7 +78,8 @@
           "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
           "lucide-react": "https://esm.sh/lucide-react@0.294.0",
           "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
-          "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"
+          "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js",
+          "firebase/auth": "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js"
         }
       }
     </script>
@@ -99,6 +101,7 @@
             Download, FileJson, FileSpreadsheet, Camera, Clipboard, CheckCircle, XSquare, Sprout
         } from 'lucide-react';
         import { initializeApp } from 'firebase/app';
+        import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, getIdTokenResult } from 'firebase/auth';
         import {
             getFirestore, collection, onSnapshot, query, orderBy, limit, collectionGroup,
             doc, updateDoc, deleteDoc, setDoc, addDoc, getDocs, where, increment
@@ -114,6 +117,8 @@
         };
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
+        const makroAuth = getAuth(app);
+        const MAKRO_API_BASE = document.querySelector('meta[name="makro-api-base"]')?.content?.trim().replace(/\/$/, '') || '';
 
         /* ─────────────────────────── helpers ─────────────────────────── */
 
@@ -645,6 +650,209 @@
                 </div>
             );
         };
+
+        function MakroReviewPanel({ rawItems }) {
+            const [adminUser, setAdminUser] = useState(null);
+            const [claimChecked, setClaimChecked] = useState(false);
+            const [isAdmin, setIsAdmin] = useState(false);
+            const [jobId, setJobId] = useState('');
+            const [run, setRun] = useState(null);
+            const [records, setRecords] = useState([]);
+            const [reviewOffset, setReviewOffset] = useState(0);
+            const [reviewTotal, setReviewTotal] = useState(0);
+            const [savedRunId, setSavedRunId] = useState('');
+            const [busy, setBusy] = useState(false);
+            const [error, setError] = useState('');
+            const [selectedMatches, setSelectedMatches] = useState({});
+            const [acknowledged, setAcknowledged] = useState({});
+            const [staged, setStaged] = useState({});
+            const [published, setPublished] = useState({});
+            const [legacySearch, setLegacySearch] = useState({});
+            const [legacySelections, setLegacySelections] = useState({});
+            const [linked, setLinked] = useState({});
+            const [storeCode, setStoreCode] = useState('01');
+            const [maxPages, setMaxPages] = useState(1);
+
+            useEffect(() => onAuthStateChanged(makroAuth, async user => {
+                setAdminUser(user);
+                setClaimChecked(false);
+                setIsAdmin(false);
+                if (user && !user.isAnonymous) {
+                    try {
+                        const token = await getIdTokenResult(user, true);
+                        setIsAdmin(token.claims.admin === true);
+                    } catch (e) { setError(`ตรวจสอบสิทธิ์ไม่สำเร็จ: ${e.message}`); }
+                }
+                setClaimChecked(true);
+            }), []);
+
+            const api = async (path, options = {}) => {
+                if (!MAKRO_API_BASE) throw new Error('ยังไม่ได้ตั้งค่า Makro API URL ใน meta makro-api-base');
+                if (!makroAuth.currentUser) throw new Error('กรุณาเข้าสู่ระบบ');
+                const token = await makroAuth.currentUser.getIdToken();
+                const response = await fetch(`${MAKRO_API_BASE}${path}`, {
+                    ...options,
+                    headers: { Authorization: `Bearer ${token}`, ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers }
+                });
+                const body = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(body.detail || body.error || `HTTP ${response.status}`);
+                return body;
+            };
+
+            const signIn = async () => {
+                setError('');
+                try { await signInWithPopup(makroAuth, new GoogleAuthProvider()); }
+                catch (e) { setError(`เข้าสู่ระบบไม่สำเร็จ: ${e.message}`); }
+            };
+            const startRun = async () => {
+                setBusy(true); setError(''); setRun(null); setRecords([]); setReviewTotal(0); setSavedRunId('');
+                setStaged({}); setPublished({}); setSelectedMatches({}); setAcknowledged({}); setLinked({});
+                try {
+                    const code = storeCode.trim();
+                    if (!/^[A-Za-z0-9_-]+$/.test(code)) throw new Error('รหัสสาขาไม่ถูกต้อง');
+                    const result = await api('/api/makro/runs', { method: 'POST', body: JSON.stringify({ store_code: code, max_pages: maxPages, max_products: 0, category: null, resume: true, details: true }) });
+                    if (!result.job_id) throw new Error('API ไม่ส่ง job_id');
+                    setJobId(result.job_id);
+                } catch (e) { setError(e.message); }
+                setBusy(false);
+            };
+            const loadRun = async id => {
+                try { setRun(await api(`/api/makro/jobs/${encodeURIComponent(id)}`)); }
+                catch (e) { setError(e.message); }
+            };
+            useEffect(() => {
+                if (!jobId || !isAdmin || ['finished', 'failed'].includes(run?.state)) return;
+                loadRun(jobId);
+                const timer = setInterval(() => loadRun(jobId), 5000);
+                return () => clearInterval(timer);
+            }, [jobId, isAdmin, run?.state]);
+            const loadReview = async (offset = 0) => {
+                const id = savedRunId ? Number(savedRunId) : run?.run_id;
+                if (!Number.isInteger(id)) { setError('รอให้งานเสร็จและได้รับ run_id ก่อน'); return; }
+                setBusy(true); setError('');
+                try {
+                    const result = await api(`/api/makro/runs/${encodeURIComponent(id)}/review?offset=${offset}&limit=100`);
+                    setRecords(result.records || result.items || []);
+                    setReviewOffset(offset);
+                    setReviewTotal(Number(result.total) || 0);
+                } catch (e) { setError(e.message); }
+                setBusy(false);
+            };
+            const existing = rawItems.filter(item => item.deleted !== true && item.status !== 'hidden' && item.canonicalProductId);
+            const suggestions = name => {
+                const words = String(name || '').toLowerCase().split(/\s+/).filter(w => w.length > 1);
+                if (!words.length) return [];
+                return existing.map(item => ({ item, score: words.filter(w => String(item.name || '').toLowerCase().includes(w)).length }))
+                    .filter(result => result.score > 0).sort((a, b) => b.score - a.score).slice(0, 5).map(result => result.item);
+            };
+            const legacySuggestions = (name, search) => {
+                const term = String(search || name || '').toLowerCase().trim();
+                if (!term) return [];
+                return rawItems.filter(item => item.deleted !== true && item.source !== 'makro' && !item.canonicalProductId &&
+                    `${item.name || ''} ${item.brand || ''} ${item.store || ''}`.toLowerCase().includes(term)).slice(0, 30);
+            };
+            const approve = async (record, key) => {
+                setBusy(true); setError('');
+                try {
+                    const sourceId = record.price_observation?.source_product_id;
+                    const canonicalId = (selectedMatches[key] || '').trim();
+                    const activeRunId = savedRunId ? Number(savedRunId) : run?.run_id;
+                    if (!sourceId || !Number.isInteger(activeRunId)) throw new Error('ข้อมูลสินค้า/งานไม่ครบ');
+                    if (record.coverage_warnings?.length && !acknowledged[key]) throw new Error('กรุณารับทราบคำเตือนก่อนอนุมัติ');
+                    const result = await api('/api/makro/approvals', { method: 'POST', body: JSON.stringify({
+                        run_id: activeRunId, source_product_id: sourceId,
+                        ...(canonicalId ? { canonical_product_id: canonicalId } : { create_new: true }),
+                        acknowledge_warnings: !!acknowledged[key]
+                    }) });
+                    setStaged(prev => ({ ...prev, [key]: result }));
+                } catch (e) { setError(e.message); }
+                setBusy(false);
+            };
+            const publish = async (record, key) => {
+                setBusy(true); setError('');
+                try {
+                    const result = await api('/api/makro/publish', { method: 'POST', body: JSON.stringify({
+                        store_code: record.price_observation.store_code,
+                        source_product_id: record.price_observation.source_product_id
+                    }) });
+                    setPublished(prev => ({ ...prev, [key]: result }));
+                } catch (e) { setError(e.message); }
+                setBusy(false);
+            };
+            const linkLegacy = async (key) => {
+                setBusy(true); setError('');
+                try {
+                    const itemId = legacySelections[key];
+                    const canonicalId = staged[key]?.canonical_product_id;
+                    if (!itemId || !canonicalId || !published[key]) throw new Error('เลือกสินค้าเดิมและเผยแพร่ Makro ก่อน');
+                    const result = await api('/api/catalog/links', { method: 'POST', body: JSON.stringify({ item_id: itemId, canonical_product_id: canonicalId }) });
+                    setLinked(prev => ({ ...prev, [key]: [...(prev[key] || []), result.item_id] }));
+                    setLegacySelections(prev => ({ ...prev, [key]: '' }));
+                } catch (e) { setError(e.message); }
+                setBusy(false);
+            };
+
+            return <div className="bg-white rounded-2xl border border-blue-100 p-6 space-y-5">
+                <div><h2 className="text-lg font-bold text-slate-800">Makro PRO · ดึงราคาและจับคู่สินค้า</h2>
+                    <p className="text-xs text-slate-500 mt-1">เริ่มงานบนเซิร์ฟเวอร์ แล้วตรวจสินค้าและราคาส่งก่อนเผยแพร่</p></div>
+                {!MAKRO_API_BASE && <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">ตั้งค่า URL ของบริการ Makro ใน meta <code>makro-api-base</code> ของหน้านี้ก่อนใช้งาน</div>}
+                {!claimChecked ? <p className="text-sm text-slate-500">กำลังตรวจสอบบัญชี…</p> : !adminUser || adminUser.isAnonymous ?
+                    <button onClick={signIn} className="rounded-xl bg-blue-600 px-4 py-2 text-white text-sm font-bold">เข้าสู่ระบบผู้ดูแลด้วย Google</button> : !isAdmin ?
+                    <div className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-700">บัญชี {adminUser.email || adminUser.uid} ไม่มีสิทธิ์ admin สำหรับ Makro API</div> : <>
+                    <div className="flex flex-wrap items-end gap-3 rounded-xl bg-slate-50 p-4">
+                        <label className="text-xs font-bold text-slate-600">รหัสสาขา Makro<input value={storeCode} onChange={e => setStoreCode(e.target.value)} className="block mt-1 w-44 rounded-lg border border-slate-300 p-2" /></label>
+                        <label className="text-xs font-bold text-slate-600">จำนวนหน้าสูงสุด<input type="number" min="1" max="500" value={maxPages} onChange={e => setMaxPages(Math.min(500, Math.max(1, Math.floor(Number(e.target.value) || 1))))} className="block mt-1 w-28 rounded-lg border border-slate-300 p-2" /></label>
+                        <button onClick={startRun} disabled={busy || !MAKRO_API_BASE} className="rounded-xl bg-blue-600 px-4 py-2 text-white text-sm font-bold disabled:opacity-50">{busy ? 'กำลังทำงาน…' : 'ดึงข้อมูล Makro'}</button>
+                        {jobId && <button onClick={() => loadRun(jobId)} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold">รีเฟรชสถานะ</button>}
+                    </div>
+                    {jobId && <div className="rounded-xl border border-slate-200 p-4 text-sm">งาน {jobId} · สถานะ: <b>{run?.state || 'กำลังเริ่ม'}</b>
+                        {run?.report && <pre className="mt-2 max-h-36 overflow-auto text-xs whitespace-pre-wrap">{JSON.stringify(run.report, null, 2)}</pre>}
+                        {run?.error && <p className="mt-2 text-red-600">{run.error}</p>}
+                        <button onClick={() => loadReview(0)} disabled={busy || run?.state !== 'finished' || !Number.isInteger(run?.run_id)} className="block mt-3 rounded-lg bg-green-600 px-3 py-2 text-white text-xs font-bold disabled:opacity-50">ตรวจรายการที่ดึงมา</button>
+                    </div>}
+                    <div className="flex flex-wrap items-end gap-2 rounded-xl border border-slate-200 p-3 text-xs"><label className="font-bold text-slate-600">เปิดผลการดึงข้อมูลเดิม (run ID)<input type="number" min="1" value={savedRunId} onChange={e => { setSavedRunId(e.target.value); setRecords([]); setStaged({}); setPublished({}); }} className="mt-1 block w-32 rounded-lg border border-slate-300 p-2" /></label><button onClick={() => loadReview(0)} disabled={busy || !savedRunId || !MAKRO_API_BASE} className="rounded-lg bg-slate-700 px-3 py-2 text-white font-bold disabled:opacity-50">เปิดรายการ</button></div>
+                    {records.length > 0 && <div className="space-y-3">
+                        <div className="flex items-center justify-between text-xs text-slate-500"><span>รายการ {reviewOffset + 1}–{reviewOffset + records.length} จาก {reviewTotal}</span><div className="flex gap-3"><button onClick={() => loadReview(Math.max(0, reviewOffset - 100))} disabled={reviewOffset === 0} className="font-bold text-blue-600 disabled:opacity-40">← ก่อนหน้า</button><button onClick={() => loadReview(reviewOffset + records.length)} disabled={reviewOffset + records.length >= reviewTotal} className="font-bold text-blue-600 disabled:opacity-40">หน้าถัดไป →</button></div></div>
+                        {records.map((record, index) => {
+                            const product = record.canonical_product_candidate || record.product || {};
+                            const observation = record.price_observation || {};
+                            const name = product.name || record.name || observation.name || 'ไม่ระบุชื่อ';
+                            const key = observation.source_product_id || `${reviewOffset + index}`;
+                            const matches = suggestions(name);
+                            const legacyMatches = legacySuggestions(name, legacySearch[key]);
+                            return <div key={key} className="rounded-xl border border-slate-200 p-4 text-sm">
+                                <div className="font-bold text-slate-800">Makro: {name}</div>
+                                <div className="mt-1 text-xs text-slate-500">Makro {observation.store_code || ''} · SKU {observation.source_product_id || '—'} · ฿{observation.price ?? '—'}</div>
+                                <div className="mt-1 text-xs text-slate-500">แพ็ก: {product.unit || '—'} · {observation.pack?.item_count || '—'} ชิ้น · {observation.pack?.total_base_units || '—'} {observation.pack?.base_unit || ''}</div>
+                                {Array.isArray(observation.tiers) && <div className="mt-1 text-xs text-blue-700">ราคาส่ง: {observation.tiers.map(t => `${t.min_packs}+ แพ็ก ฿${t.price_per_pack}`).join(' · ')}</div>}
+                                {record.coverage_warnings?.length > 0 && <div className="mt-2 text-xs text-amber-700">⚠ {record.coverage_warnings.join(' · ')}</div>}
+                                <label className="block mt-3 text-xs font-bold text-slate-600">สินค้า canonical
+                                    <select value={selectedMatches[key] || ''} onChange={e => setSelectedMatches(prev => ({ ...prev, [key]: e.target.value }))} className="mt-1 block w-full rounded-lg border border-slate-300 p-2 font-normal">
+                                        <option value="">สร้างสินค้า canonical ใหม่จากรายการนี้</option>
+                                        {matches.map(item => <option key={item.id} value={item.canonicalProductId}>{item.name} · {item.brand || 'ไม่ระบุยี่ห้อ'} · {item.canonicalProductId}</option>)}
+                                    </select>
+                                </label>
+                                <input value={selectedMatches[key] || ''} onChange={e => setSelectedMatches(prev => ({ ...prev, [key]: e.target.value }))} placeholder="หรือกรอก canonical product ID ที่มีอยู่" className="mt-2 w-full rounded-lg border border-slate-300 p-2 text-xs" />
+                                <div className="mt-2 text-xs text-slate-500">ชื่อสินค้า canonical ที่จะใช้: <b>{selectedMatches[key] ? (matches.find(item => item.canonicalProductId === selectedMatches[key])?.name || 'ตาม ID ที่กรอก') : name}</b> · ID: <b>{staged[key]?.canonical_product_id || selectedMatches[key] || 'สร้างเมื่ออนุมัติ'}</b></div>
+                                {record.coverage_warnings?.length > 0 && <label className="mt-2 flex gap-2 text-xs text-amber-800"><input type="checkbox" checked={!!acknowledged[key]} onChange={e => setAcknowledged(prev => ({ ...prev, [key]: e.target.checked }))} /> รับทราบคำเตือนข้างต้น</label>}
+                                <div className="mt-3 flex gap-2">
+                                    <button onClick={() => approve(record, key)} disabled={busy || !!staged[key] || (!savedRunId && run?.report?.status !== 'complete')} className="rounded-lg bg-blue-600 px-3 py-2 text-white text-xs font-bold disabled:opacity-50">{staged[key] ? 'อนุมัติแล้ว' : 'อนุมัติการจับคู่'}</button>
+                                    <button onClick={() => publish(record, key)} disabled={busy || !staged[key] || !!published[key]} className="rounded-lg bg-green-600 px-3 py-2 text-white text-xs font-bold disabled:opacity-50">{published[key] ? 'เผยแพร่แล้ว' : 'เผยแพร่ราคา Makro'}</button>
+                                </div>
+                                {published[key] && <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-xs space-y-2">
+                                    <div className="font-bold text-green-800">เชื่อมราคาจากร้านอื่นกับ {staged[key]?.canonical_product_id}</div>
+                                    <input value={legacySearch[key] || ''} onChange={e => setLegacySearch(prev => ({ ...prev, [key]: e.target.value }))} placeholder="ค้นหาชื่อ ยี่ห้อ หรือร้านของสินค้าเดิม" className="w-full rounded-lg border border-green-200 p-2" />
+                                    <select value={legacySelections[key] || ''} onChange={e => setLegacySelections(prev => ({ ...prev, [key]: e.target.value }))} className="w-full rounded-lg border border-green-200 p-2"><option value="">เลือกโพสต์ราคาจากร้านอื่น</option>{legacyMatches.map(item => <option key={item.id} value={item.id}>{item.name} · {item.brand || '—'} · {item.store} · {item.id}</option>)}</select>
+                                    <button onClick={() => linkLegacy(key)} disabled={busy || !legacySelections[key]} className="rounded-lg bg-green-700 px-3 py-2 text-white font-bold disabled:opacity-50">เชื่อมสินค้าที่เลือก</button>
+                                    {linked[key]?.length > 0 && <div className="text-green-700">เชื่อมแล้ว {linked[key].length} รายการ</div>}
+                                </div>}
+                            </div>;
+                        })}
+                    </div>}
+                </>}
+                {error && <div role="alert" className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</div>}
+            </div>;
+        }
 
         /* ═══════════════════════════════════════════════════════════════
            MAIN APP
@@ -1803,6 +2011,7 @@
                                 { key: 'merge', label: 'รวมข้อมูลซ้ำซ้อน', badge: selectedForMerge.length > 0 ? selectedForMerge.length : null },
                                 { key: 'stores', label: 'จัดการสาขา' },
                                 { key: 'import', label: 'Import', accent: 'yellow' },
+                                { key: 'makro', label: 'Makro PRO', accent: 'blue' },
                                 { key: 'export', label: 'Export', accent: 'green' },
                             ].map(sub => (
                                 <button key={sub.key} onClick={() => { setManageSubTab(sub.key); setExpandedGroups([]); }}
@@ -1815,7 +2024,7 @@
                     )}
 
                     {/* ── MANAGE: Show User Added bar + Delete mode bar ── */}
-                    {adminTab === 'manage' && manageSubTab !== 'import' && manageSubTab !== 'export' && manageSubTab !== 'addprice' && (
+                    {adminTab === 'manage' && manageSubTab !== 'import' && manageSubTab !== 'makro' && manageSubTab !== 'export' && manageSubTab !== 'addprice' && (
                         <div className="bg-slate-50 border-b border-gray-200 px-8 py-2.5 flex items-center justify-between gap-4 shadow-sm z-10 relative">
                             {/* Show User Added Toggle */}
                             <div className="flex-1 max-w-md">
@@ -2668,6 +2877,8 @@
                                 </div>
                             );
                         })()}
+
+                        {adminTab === 'manage' && manageSubTab === 'makro' && <MakroReviewPanel rawItems={rawItems} />}
 
                         {/* ═══════ IMPORT TAB ═══════ */}
                         {adminTab === 'manage' && manageSubTab === 'import' && (
@@ -4829,8 +5040,26 @@
             );
         }
 
+        function AdminGate() {
+            const [state, setState] = useState('checking');
+            const [error, setError] = useState('');
+            useEffect(() => onAuthStateChanged(makroAuth, async user => {
+                if (!user || user.isAnonymous) { setState('signed-out'); return; }
+                try {
+                    const token = await getIdTokenResult(user, true);
+                    setState(token.claims.admin === true ? 'admin' : 'denied');
+                } catch (e) { setError(e.message); setState('denied'); }
+            }), []);
+            if (state === 'admin') return <AdminApp />;
+            return <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6"><div className="max-w-md w-full rounded-2xl bg-white p-7 shadow-lg text-center">
+                <h1 className="text-xl font-bold text-slate-800">Price Admin</h1>
+                <p className="mt-3 text-sm text-slate-600">{state === 'checking' ? 'กำลังตรวจสอบสิทธิ์…' : state === 'denied' ? 'บัญชีนี้ไม่มีสิทธิ์ผู้ดูแลระบบ' : 'เข้าสู่ระบบผู้ดูแลก่อนใช้งาน'}</p>
+                {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+                {state !== 'checking' && <button onClick={async () => { setError(''); try { await signInWithPopup(makroAuth, new GoogleAuthProvider()); } catch (e) { setError(e.message); } }} className="mt-5 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white">เข้าสู่ระบบด้วย Google</button>}
+            </div></div>;
+        }
         const root = createRoot(document.getElementById('root'));
-        root.render(<AdminApp />);
+        root.render(<AdminGate />);
     </script>
 </body>
 

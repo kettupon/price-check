@@ -4,7 +4,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>DealHunter Prototype</title>
+    <title>DealHunter — เปรียบเทียบราคาและค้นหาดีล</title>
+    <meta name="description" content="เปรียบเทียบราคาและราคาต่อหน่วย ค้นหาดีลจากหลายร้านในที่เดียว">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;700&display=swap"
         rel="stylesheet">
 
@@ -138,6 +139,7 @@
       }
     </script>
     <script src="https://unpkg.com/@babel/standalone@7.26.10/babel.min.js"></script>
+    <script src="pricing.js"></script>
 </head>
 
 <body class="bg-stone-100">
@@ -147,10 +149,11 @@
         import React, { useState, useEffect, useRef, useMemo } from 'react';
         import { createPortal } from 'react-dom';
         import { createRoot } from 'react-dom/client';
+        import PriceNotebookView from './price-notebook-view.js';
         import {
             MapPin, Users, Tag, AlertCircle, Plus, Trophy, Heart, MessageSquare,
             Share2, Search, Zap, Home, ListPlus, Calculator, ChevronLeft, ChevronRight, Image as ImageIcon,
-            Coffee, ShoppingCart, Store, Package, User, X, ShoppingBag, ImageOff, Camera, FileText,
+            Coffee, Store, Package, User, X, ShoppingBag, ImageOff, Camera, FileText,
             Grid, Folder, Bell, Clock, Link2, MoreVertical, Flag, CheckCircle2, XCircle, Edit3, Lock, Shield, ShieldCheck, Trash2, Check, Settings, Upload, CheckCircle
         } from 'lucide-react';
         import { initializeApp } from 'firebase/app';
@@ -366,7 +369,6 @@
                         createdAt: new Date().toISOString(),
                         deleted: false
                     });
-                    await updateDoc(doc(db, "items", itemId), { comments: increment(1) });
 
                     if (activeUser.isAnonymous) {
                         setTopToastMessage({ title: 'บันทึกแล้ว! สมัครบัญชีเพื่อไม่ให้ข้อมูลหาย', isSuccess: false });
@@ -383,7 +385,6 @@
                 if (!currentUser || currentUser.uid !== userId) throw new Error('Unauthorized');
                 try {
                     await updateDoc(doc(db, "items", itemId, "comments", commentId), { deleted: true });
-                    await updateDoc(doc(db, "items", itemId), { comments: increment(-1) });
                 } catch (e) {
                     console.error("Error deleting comment:", e);
                     throw e;
@@ -1053,7 +1054,7 @@
         function App() {
             const [appFont, setAppFont] = useState('sans');
             const [showSettingsModal, setShowSettingsModal] = useState(false);
-            const [currentView, setCurrentView] = useState('feed');
+            const [currentView, setCurrentView] = useState(new URLSearchParams(window.location.search).get('view') === 'notebook' ? 'notebook' : 'feed');
             const [showShippingInFeed, setShowShippingInFeed] = useState(false);
             const [showVolumeInFeed, setShowVolumeInFeed] = useState(false);
             const [pdpaAccepted, setPdpaAccepted] = useState(() => {
@@ -1072,6 +1073,7 @@
             const [deals, setDeals] = useState([]);
             const [groupedDeals, setGroupedDeals] = useState([]);
             const [feedLoaded, setFeedLoaded] = useState(false);
+            const [feedError, setFeedError] = useState(false);
             const [feedLimit, setFeedLimit] = useState(10);
             const [searchQuery, setSearchQuery] = useState('');
             const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
@@ -1079,6 +1081,9 @@
             const searchResultCountRef = useRef(0);
             const searchCache = useRef({});
             const [selectedProduct, setSelectedProduct] = useState(null);
+            const [purchaseQuantity, setPurchaseQuantity] = useState(1);
+            const [purchaseUnit, setPurchaseUnit] = useState('items');
+            const [comparisonBasis, setComparisonBasis] = useState('items');
             const [showAllVariants, setShowAllVariants] = useState(false);
             const [zoomedImage, setZoomedImage] = useState(null);
             const [expandedComments, setExpandedComments] = useState({});
@@ -1329,7 +1334,7 @@
                 // Track page view
                 try {
                     const today = new Date().toISOString().slice(0, 10);
-                    setDoc(doc(db, 'analytics', today), { views: increment(1), date: today }, { merge: true });
+                    setDoc(doc(db, 'analytics', today), { views: increment(1), date: today }, { merge: true }).catch(() => {});
                 } catch (e) { console.error('Track pageview error:', e); }
                 return () => unsubscribeAuth();
             }, []);
@@ -1488,13 +1493,14 @@
             useEffect(() => {
                 const q = query(collection(db, "items"), orderBy("lastUpdated", "desc"));
                 const unsubscribe = onSnapshot(q, (snapshot) => {
+                    setFeedError(false);
                     const fbDeals = snapshot.docs
                         .filter(doc => doc.data().deleted !== true && (doc.data().status || "active") !== "hidden")
                         .map(doc => {
                             const data = doc.data();
                             const numPrice = parseFloat(data.price) || 0;
                             const numCashback = data.cashbackUsed ? (parseFloat(data.cashbackAmount) || 0) : 0;
-                            const totalPrice = Math.max(0, numPrice - numCashback);
+                            const totalPrice = window.DealHunterPricing.quote(data, 1).total;
 
                             const unitQty = parseInt(data.unitQuantity) || 1;
                             const subUnit = data.subUnit || data.unitType || 'ชิ้น';
@@ -1507,14 +1513,14 @@
 
                             const totalVolume = (() => {
                                 if (subMode === 'one' && (subUnitCategory === 'volume' || subUnitCategory === 'weight')) {
-                                    return (parseFloat(subUnitSize) || 0) * (TO_BASE[subUnitSizeType] || 1);
+                                    return unitQty * (parseFloat(subUnitSize) || 0) * (TO_BASE[subUnitSizeType] || 1);
                                 }
                                 if (subMode === 'many') {
                                     if (subUnitEqual && (subUnitCategory === 'volume' || subUnitCategory === 'weight')) {
-                                        return subUnitCount * (parseFloat(subUnitSize) || 0) * (TO_BASE[subUnitSizeType] || 1);
+                                        return unitQty * subUnitCount * (parseFloat(subUnitSize) || 0) * (TO_BASE[subUnitSizeType] || 1);
                                     }
                                     if (!subUnitEqual && subUnitSize) {
-                                        return parseFloat(subUnitSize) * (TO_BASE[subUnitSizeType] || 1);
+                                        return unitQty * parseFloat(subUnitSize) * (TO_BASE[subUnitSizeType] || 1);
                                     }
                                 }
                                 return 0;
@@ -1534,11 +1540,11 @@
                                 subUnit, subUnitMode: subMode, subUnitCount, subUnitSize, subUnitSizeType, subUnitCategory, subUnitEqual, totalVolume,
                                 normalPrice: Math.round(data.price * 1.2),
                                 shop: data.store || "ไม่ระบุร้าน", distance: "? km",
-                                masterImage: data.masterImage || "",
+                                masterImage: data.masterImage || data.imageUrl || "",
                                 stickers: ppu < 10 ? ["🔥 คุ้มสุด!"] : [],
                                 likes: data.likes || 0,
-                                comments: data.comments || 0, image: data.image || "",
-                                timePosted: new Date(data.lastUpdated).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }),
+                                comments: data.comments || 0, image: data.image || data.imageUrl || "",
+                                timePosted: new Date(data.lastUpdated?.toMillis?.() || data.lastUpdated || Date.now()).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }),
                                 reporter: "Live User",
                                 cashbackUsed: data.cashbackUsed || false,
                                 tags: data.tags || [],
@@ -1554,7 +1560,9 @@
                                 userDisplayName: data.userDisplayName || 'ผู้ใช้',
                                 userPhotoURL: data.userPhotoURL || null,
                                 status: data.status || "active",
-                                lastUpdated: data.lastUpdated || Date.now(),
+                                canonicalProductId: data.canonicalProductId || null,
+                                priceTiers: Array.isArray(data.priceTiers) ? data.priceTiers : [],
+                                lastUpdated: data.lastUpdated?.toMillis?.() || data.lastUpdated || Date.now(),
                                 store: data.store
                             };
                         })
@@ -1564,14 +1572,15 @@
                             item.price && parseFloat(item.price) > 0
                         );
                     setDeals(fbDeals);
-                    if (!feedLoaded) setFeedLoaded(true);
+                    setFeedLoaded(true);
 
                     const grouped = {};
                     fbDeals.forEach(deal => {
                         const name = deal.name || 'Unknown';
-                        if (!grouped[name]) {
-                            grouped[name] = {
-                                id: deal.id, name, brand: deal.brand, status: deal.status,
+                        const groupKey = deal.canonicalProductId ? `canonical:${deal.canonicalProductId}` : `name:${name}`;
+                        if (!grouped[groupKey]) {
+                            grouped[groupKey] = {
+                                id: deal.id, name, canonicalProductId: deal.canonicalProductId, brand: deal.brand, status: deal.status,
                                 masterImage: deal.masterImage || deal.image,
                                 lowestPrice: deal.price, lowestPpu: deal.ppu, lowestPpuVolume: deal.ppuVolume,
                                 lowestPpuWithShipping: deal.ppuWithShipping, lowestPpuVolumeWithShipping: deal.ppuVolumeWithShipping,
@@ -1581,31 +1590,35 @@
                                 tags: [...deal.tags], description: deal.description || ""
                             };
                         } else {
-                            grouped[name].postsCount += 1;
-                            grouped[name].lowestPrice = Math.min(grouped[name].lowestPrice, deal.price);
+                            grouped[groupKey].postsCount += 1;
+                            grouped[groupKey].lowestPrice = Math.min(grouped[groupKey].lowestPrice, deal.price);
                             if (deal.ppu !== null) {
-                                grouped[name].lowestPpu = grouped[name].lowestPpu === null ? deal.ppu : Math.min(grouped[name].lowestPpu, deal.ppu);
+                                grouped[groupKey].lowestPpu = grouped[groupKey].lowestPpu === null ? deal.ppu : Math.min(grouped[groupKey].lowestPpu, deal.ppu);
                             }
                             if (deal.ppuWithShipping !== null) {
-                                grouped[name].lowestPpuWithShipping = grouped[name].lowestPpuWithShipping === null ? deal.ppuWithShipping : Math.min(grouped[name].lowestPpuWithShipping, deal.ppuWithShipping);
+                                grouped[groupKey].lowestPpuWithShipping = grouped[groupKey].lowestPpuWithShipping === null ? deal.ppuWithShipping : Math.min(grouped[groupKey].lowestPpuWithShipping, deal.ppuWithShipping);
                             }
                             if (deal.ppuVolume !== null) {
-                                grouped[name].lowestPpuVolume = grouped[name].lowestPpuVolume === null ? deal.ppuVolume : Math.min(grouped[name].lowestPpuVolume, deal.ppuVolume);
+                                grouped[groupKey].lowestPpuVolume = grouped[groupKey].lowestPpuVolume === null ? deal.ppuVolume : Math.min(grouped[groupKey].lowestPpuVolume, deal.ppuVolume);
                             }
                             if (deal.ppuVolumeWithShipping !== null) {
-                                grouped[name].lowestPpuVolumeWithShipping = grouped[name].lowestPpuVolumeWithShipping === null ? deal.ppuVolumeWithShipping : Math.min(grouped[name].lowestPpuVolumeWithShipping, deal.ppuVolumeWithShipping);
+                                grouped[groupKey].lowestPpuVolumeWithShipping = grouped[groupKey].lowestPpuVolumeWithShipping === null ? deal.ppuVolumeWithShipping : Math.min(grouped[groupKey].lowestPpuVolumeWithShipping, deal.ppuVolumeWithShipping);
                             }
-                            if (deal.masterImage && (!grouped[name].masterImage || grouped[name].masterImage === grouped[name].image)) {
-                                grouped[name].masterImage = deal.masterImage;
+                            if (deal.masterImage && (!grouped[groupKey].masterImage || grouped[groupKey].masterImage === grouped[groupKey].image)) {
+                                grouped[groupKey].masterImage = deal.masterImage;
                             }
-                            if (deal.description && !grouped[name].description) grouped[name].description = deal.description;
+                            if (deal.description && !grouped[groupKey].description) grouped[groupKey].description = deal.description;
                             if (deal.tags && deal.tags.length > 0) {
-                                deal.tags.forEach(tag => { if (!grouped[name].tags.includes(tag)) grouped[name].tags.push(tag); });
+                                deal.tags.forEach(tag => { if (!grouped[groupKey].tags.includes(tag)) grouped[groupKey].tags.push(tag); });
                             }
                         }
                     });
                     setGroupedDeals(Object.values(grouped));
                     searchCache.current = {}; // Invalidate cache on new data
+                }, error => {
+                    console.error('Price feed unavailable:', error);
+                    setFeedError(true);
+                    setFeedLoaded(true);
                 });
 
                 const storesUnsub = onSnapshot(collection(db, "stores"), (snapshot) => {
@@ -1636,30 +1649,34 @@
                         deleted: doc.data().deleted || false
                     })).filter(n => !n.hidden && !n.deleted);
                     setAdminNews(newsItems);
-                    // Update unread count: unread = total - viewed
-                    const unreadCount = newsItems.filter(n => !viewedNewsIds.includes(n.id)).length;
-                    setUnreadAdminNewsCount(unreadCount);
                 });
                 return () => newsUnsub();
-            }, [viewedNewsIds]);
+            }, []);
+
+            useEffect(() => {
+                setUnreadAdminNewsCount(adminNews.filter(news => !viewedNewsIds.includes(news.id)).length);
+            }, [adminNews, viewedNewsIds]);
 
             // ── Fetch user's tipoffs ──
             useEffect(() => {
                 if (!currentUser) { setMyTipoffs([]); return; }
                 const tipoffQ = query(collection(db, "tipoffs"), where("userId", "==", currentUser.uid), orderBy("createdAt", "desc"));
+                let fallbackUnsub = null;
+                let active = true;
                 const tipoffUnsub = onSnapshot(tipoffQ, (snapshot) => {
                     setMyTipoffs(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
                 }, (error) => {
                     console.error("Tipoff query error:", error);
+                    if (!active) return;
                     // Fallback: try without orderBy (no composite index needed)
                     const fallbackQ = query(collection(db, "tipoffs"), where("userId", "==", currentUser.uid));
-                    onSnapshot(fallbackQ, (snap) => {
+                    fallbackUnsub = onSnapshot(fallbackQ, (snap) => {
                         const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                         items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
                         setMyTipoffs(items);
-                    });
+                    }, fallbackError => console.error('Tipoff fallback query error:', fallbackError));
                 });
-                return () => tipoffUnsub();
+                return () => { active = false; tipoffUnsub(); if (fallbackUnsub) fallbackUnsub(); };
             }, [currentUser]);
 
             // Add Deal Form State
@@ -1876,7 +1893,7 @@
                     await addDoc(collection(db, "items", docRef.id, "priceHistory"), {
                         price: parseFloat(price),
                         store: resolveStoreName(store),
-                        userId: currentUser?.uid || 'guest',
+                        userId: activeUser.uid,
                         timestamp: Date.now()
                     });
 
@@ -2454,6 +2471,14 @@
                                         </div>
                                     </div>
                                 ))
+                            ) : feedError ? (
+                                <div className="col-span-2 rounded-2xl bg-white p-6 text-center text-sm text-gray-600">
+                                    <p className="font-bold text-gray-800">โหลดราคาไม่สำเร็จ</p>
+                                    <p className="mt-1">ตรวจสอบการเชื่อมต่อแล้วลองใหม่อีกครั้ง</p>
+                                    <button onClick={() => window.location.reload()} className="mt-4 rounded-xl bg-green-600 px-4 py-2 font-bold text-white">ลองใหม่</button>
+                                </div>
+                            ) : visibleItems.length === 0 ? (
+                                <div className="col-span-2 rounded-2xl bg-white p-6 text-center text-sm text-gray-600">ยังไม่มีดีลในขณะนี้</div>
                             ) : (
                                 visibleItems.map(deal => renderProductCard(deal, false))
                             )}
@@ -3353,7 +3378,9 @@
                 if (showAllVariants && variantGroup) {
                     productDeals = deals.filter(d => variantGroup.items.includes(d.name)).sort((a, b) => a.ppu - b.ppu);
                 } else {
-                    productDeals = deals.filter(d => d.name === selectedProduct.name).sort((a, b) => a.ppu - b.ppu);
+                    productDeals = deals.filter(d => selectedProduct.canonicalProductId
+                        ? d.canonicalProductId === selectedProduct.canonicalProductId
+                        : !d.canonicalProductId && d.name === selectedProduct.name).sort((a, b) => a.ppu - b.ppu);
                 }
                 const displayTitle = (showAllVariants && variantGroup) ? `รวมทุกรุ่น: ${variantGroup.name}` : selectedProduct.name;
                 const displayBrand = selectedProduct.brand;
@@ -3484,16 +3511,31 @@
 
                             <div className="px-4 py-3">
                                 <h3 className="text-xs font-bold text-gray-500 mb-3 uppercase tracking-wider">โพสต์และราคาจากผู้ใช้ ({productDeals.length})</h3>
+                                <div className="rounded-xl bg-blue-50 border border-blue-100 px-3 py-3 mb-3 text-xs text-blue-900 space-y-2">
+                                    <div className="flex flex-wrap items-center gap-2 font-bold">
+                                        ต้องการซื้อ
+                                        <input type="number" min="1" max="9999" value={purchaseQuantity} onChange={e => setPurchaseQuantity(Math.min(9999, Math.max(1, Math.floor(Number(e.target.value) || 1))))} className="w-20 rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-right" />
+                                        <select value={purchaseUnit} onChange={e => setPurchaseUnit(e.target.value)} className="rounded-lg border border-blue-200 bg-white px-2 py-1.5"><option value="items">ชิ้น</option><option value="packs">แพ็ก</option></select>
+                                        <button onClick={() => { setPurchaseQuantity(1); setPurchaseUnit('items'); }} className="rounded-lg border border-blue-200 bg-white px-2 py-1.5">ซื้อ 1 ชิ้น</button>
+                                    </div>
+                                    <div className="flex gap-2"><button onClick={() => setComparisonBasis('items')} className={`rounded-lg px-2 py-1.5 font-bold ${comparisonBasis === 'items' ? 'bg-blue-600 text-white' : 'bg-white text-blue-700'}`}>คุ้มสุดต่อชิ้น</button><button onClick={() => setComparisonBasis('measure')} className={`rounded-lg px-2 py-1.5 font-bold ${comparisonBasis === 'measure' ? 'bg-blue-600 text-white' : 'bg-white text-blue-700'}`}>คุ้มสุดตามน้ำหนัก/ปริมาตร</button></div>
+                                </div>
                                 <div className="space-y-3">
                                     {(() => {
-                                        const activeDeals = productDeals.filter(d => (d.status ?? 'active') === 'active').sort((a, b) => (a.ppu !== null ? a.ppu : a.price) - (b.ppu !== null ? b.ppu : b.price));
+                                        const quote = deal => {
+                                            const itemsPerPack = window.DealHunterPricing.quote(deal, 1).itemsPerPack;
+                                            const packs = purchaseUnit === 'items' ? Math.ceil(purchaseQuantity / itemsPerPack) : purchaseQuantity;
+                                            return window.DealHunterPricing.quote(deal, packs, showShippingInFeed);
+                                        };
+                                        const score = deal => comparisonBasis === 'measure' ? (quote(deal).per100 ?? Infinity) : quote(deal).perItem;
+                                        const activeDeals = productDeals.filter(d => (d.status ?? 'active') === 'active').sort((a, b) => score(a) - score(b));
                                         const expiredDeals = productDeals.filter(d => (d.status ?? 'active') === 'expired').sort((a, b) => b.lastUpdated - a.lastUpdated);
 
                                         const renderDealCard = (deal, isExpired) => {
                                             const dealCatNames = getCategoriesForProduct(deal.name);
                                             return (
                                                 <div key={deal.id} onClick={() => setSelectedDealDetail(deal)} className={`bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col gap-2 relative overflow-hidden cursor-pointer hover:shadow-md transition-shadow active:scale-[0.99] ${isExpired ? 'opacity-50 grayscale-[60%]' : ''}`}>
-                                                    {!isExpired && deal.id === activeDeals[0]?.id && <div className="absolute top-0 right-0 bg-yellow-400 text-white text-[9px] font-bold px-2 py-0.5 rounded-bl-lg shadow-sm">ถูกที่สุด!</div>}
+                                                    {!isExpired && Number.isFinite(score(deal)) && deal.id === activeDeals[0]?.id && <div className="absolute top-0 right-0 bg-yellow-400 text-white text-[9px] font-bold px-2 py-0.5 rounded-bl-lg shadow-sm">คุ้มสุด!</div>}
                                                     {/* Item name, brand, categories */}
                                                     <div className="mb-1">
                                                         <h4 className="font-bold text-gray-800 text-sm leading-tight">{deal.name}</h4>
@@ -3514,8 +3556,9 @@
                                                         </div>
                                                         <div className="flex-1 flex justify-between items-start">
                                                             <div>
-                                                                <div className={`font-bold text-base ${isExpired ? 'text-[#9CA3AF]' : 'text-gray-800'}`}>฿{deal.price} <span className="text-xs font-normal text-gray-500">({formatUnitDetail(deal)})</span></div>
-                                                                {!isExpired && <div className="text-xs font-bold text-orange-500 mt-0.5">ตกชิ้นละ ฿{deal.ppu?.toFixed(2)}</div>}
+                                                                <div className={`font-bold text-base ${isExpired ? 'text-[#9CA3AF]' : 'text-gray-800'}`}>฿{quote(deal).total.toFixed(2)} <span className="text-xs font-normal text-gray-500">ซื้อจริง {quote(deal).quantity} แพ็ก · {formatUnitDetail(deal)}</span></div>
+                                                                {!isExpired && <div className="text-xs font-bold text-orange-500 mt-0.5">ตกชิ้นละ ฿{quote(deal).perItem.toFixed(2)}{quote(deal).per100 !== null && <span className="ml-2 text-blue-600">฿{quote(deal).per100.toFixed(2)}/{quote(deal).measureUnit}</span>}</div>}
+                                                                {quote(deal).activeTier?.minQuantity > 1 && <div className="text-[10px] font-bold text-blue-600">ราคาส่งเมื่อซื้อ {quote(deal).activeTier.minQuantity} แพ็กขึ้นไป · ฿{quote(deal).packPrice.toFixed(2)}/แพ็ก</div>}
                                                                 <div className="flex flex-wrap gap-1 mt-1">
                                                                     {deal.isMemberPrice && <div className="text-[10px] text-purple-600 font-bold bg-purple-50 px-1.5 py-0.5 rounded leading-none">ราคาสมาชิก</div>}
                                                                     {deal.cashbackUsed && <div className="text-[10px] text-green-500 font-bold bg-green-50 px-1.5 py-0.5 rounded leading-none">หักแคชแบ็กแล้ว</div>}
@@ -3546,6 +3589,7 @@
                                                             </div>
                                                         </div>
                                                     </div>
+                                                    <button onClick={e => { e.stopPropagation(); setSelectedDealDetail(deal); }} className="self-start rounded-lg bg-green-600 px-3 py-1.5 text-xs font-bold text-white">ดูรายละเอียด</button>
 
                                                     <CommentSection
                                                         itemId={deal.id}
@@ -3857,6 +3901,7 @@
                         {currentView === 'feed' && renderFeed()}
                         {currentView === 'search' && renderSearch()}
                         {currentView === 'add' && renderAddDeal()}
+                        {currentView === 'notebook' && <PriceNotebookView />}
                         {currentView === 'profile' && renderProfile()}
                         {currentView === 'product_detail' && renderProductDetail()}
                         {currentView === 'store_detail' && renderStoreDetail()}
@@ -3883,6 +3928,7 @@
                                 <button onClick={() => setCurrentView('feed')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'feed' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}><Home size={20} className={currentView === 'feed' ? 'fill-current' : ''} /> หน้าแรก</button>
                                 <button onClick={() => { setCurrentView('search'); setActiveCategoryFilter(null); setActiveBrandFilter(null); setSearchFilterMode('all'); }} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'search' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}><Search size={20} /> ค้นหา</button>
                                 <button onClick={() => { if (currentView !== 'add') resetAddDealForm(); setCurrentView('add'); }} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'add' ? 'text-green-500 font-bold' : 'hover:text-green-400'}`}><ListPlus size={20} /> บอกต่อ</button>
+                                <button onClick={() => setCurrentView('notebook')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'notebook' ? 'text-green-600 font-bold' : 'hover:text-green-500'}`}><Camera size={20} /> สมุดราคา</button>
                                 <button onClick={() => setCurrentView('profile')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'profile' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}><User size={20} className={currentView === 'profile' ? 'fill-current' : ''} /> โปรไฟล์</button>
                             </nav>
                         )}
@@ -3898,7 +3944,7 @@
                                         <div className="flex-1">
                                             <h4 className="text-sm font-bold text-gray-800">นโยบายความเป็นส่วนตัว</h4>
                                             <p className="text-[11px] text-gray-500 font-medium leading-relaxed mt-0.5">
-                                                เรามีการเก็บข้อมูลราคาสินค้าที่คุณบันทึก เพื่อนำมาแสดงผลเปรียบเทียบราคาและปรับปรุงบริการให้ดียิ่งขึ้น
+                                                ข้อมูลที่คุณเผยแพร่ผ่านบอกต่อใช้แสดงการเปรียบเทียบราคา ส่วนสมุดราคาส่วนตัวบันทึกเฉพาะในเบราว์เซอร์บนอุปกรณ์นี้
                                             </p>
                                         </div>
                                     </div>
@@ -4203,6 +4249,7 @@
                                 setIsSubmittingPostReport(true);
                                 try {
                                     /* User no longer mutates item status natively upon reporting */
+                                    const reporter = auth.currentUser || (await signInAnonymously(auth)).user;
                                     await addDoc(collection(db, "reports"), {
                                         type: postReportReason,
                                         text: postReportText || '',
@@ -4210,7 +4257,7 @@
                                         itemName: postReportDeal.name,
                                         storeName: postReportDeal.shop,
                                         reportedPrice: postReportDeal.price,
-                                        userId: currentUser?.uid || 'guest',
+                                        userId: reporter.uid,
                                         userDisplayName: userDisplayName,
                                         createdAt: Date.now(),
                                         status: 'pending',

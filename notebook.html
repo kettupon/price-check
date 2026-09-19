@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Save Price — สมุดราคาของฉัน</title>
+    <meta name="description" content="บันทึกรูป ราคา และหมายเหตุส่วนตัวไว้ในอุปกรณ์นี้">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;700&display=swap"
+        rel="stylesheet">
+
+    <meta name="theme-color" content="#48A111">
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <link rel="apple-touch-icon" href="icons/icon-180.png">
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js'); });
+        }
+    </script>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        green: {
+                            50: '#f0f9eb', 100: '#dbf2ce', 200: '#bae6a1', 300: '#92d571',
+                            400: '#6dc147', 500: '#48A111', 600: '#387e0d', 700: '#2c610b',
+                            800: '#214709', 900: '#183107',
+                        },
+                        orange: {
+                            50: '#fffcf1', 100: '#fff6db', 200: '#ffebb5', 300: '#ffdc89',
+                            400: '#ffbd45', 500: '#FF8C00', 600: '#e67300', 700: '#bf5700',
+                            800: '#994000', 900: '#7d3300',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700;800&display=swap');
+
+        body {
+            font-family: 'Noto Sans Thai', sans-serif;
+        }
+
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        .pb-safe {
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
+        .animate-fade-in {
+            animation: fadeIn 0.25s ease-out forwards;
+        }
+
+        .animate-scale-in {
+            animation: scaleIn 0.2s ease-out forwards;
+        }
+
+        @keyframes scaleIn {
+            from {
+                opacity: 0;
+                transform: scale(0.92);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(100%);
+            }
+
+            to {
+                transform: translateY(0);
+            }
+        }
+
+        .animate-slide-up {
+            animation: slideUp 0.3s ease-out forwards;
+        }
+
+        @keyframes pulseOrangeYellow {
+
+            0%,
+            100% {
+                background-color: #F97316;
+                box-shadow: 0 0 12px rgba(249, 115, 22, 0.5);
+            }
+
+            50% {
+                background-color: #FBBF24;
+                box-shadow: 0 0 18px rgba(251, 191, 36, 0.6);
+            }
+        }
+
+        .animate-pulse-oy {
+            animation: pulseOrangeYellow 1.5s ease-in-out infinite;
+        }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "react": "https://esm.sh/react@18.2.0",
+          "react-dom": "https://esm.sh/react-dom@18.2.0",
+          "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+          "lucide-react": "https://esm.sh/lucide-react@0.294.0",
+          "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
+          "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js",
+          "firebase/auth": "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js",
+          "firebase/storage": "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js"
+        }
+      }
+    </script>
+</head>
+
+<body class="bg-stone-100">
+  <main id="root" class="max-w-md mx-auto min-h-screen"></main>
+  <script type="module">
+    import React from 'react';
+    import { createRoot } from 'react-dom/client';
+    import PriceNotebookView from './price-notebook-view.js';
+    createRoot(document.getElementById('root')).render(React.createElement(PriceNotebookView));
+  </script>
+</body>
+</html>

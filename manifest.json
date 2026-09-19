@@ -1,10 +1,10 @@
 {
-  "name": "Sheep PWA",
-  "short_name": "Sheep",
+  "name": "DealHunter",
+  "short_name": "DealHunter",
   "start_url": "index.html",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#f0f0f0",
+  "theme_color": "#48A111",
   "icons": [
     {
       "src": "icons/icon-192.png",

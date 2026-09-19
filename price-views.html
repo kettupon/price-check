@@ -66,7 +66,8 @@
         "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
         "lucide-react": "https://esm.sh/lucide-react@0.294.0",
         "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
-        "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"
+        "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js",
+        "firebase/auth": "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js"
       }
     }
   </script>
@@ -79,6 +80,7 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Package, Store, Search, ChevronLeft, ChevronRight, Check, X, Tag, ShoppingBag, AlertTriangle, Sprout, ShieldCheck, Plus, Edit2 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
+import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, getIdTokenResult } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, query, orderBy, addDoc, updateDoc, doc } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -91,6 +93,7 @@ const firebaseConfig = {
 };
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const auth = getAuth(app);
 
 // ── DATA ─────────────────────────────────────────────────────────────────────
 const PAGE = 20;
@@ -1364,7 +1367,28 @@ function App() {
   );
 }
 
-createRoot(document.getElementById('root')).render(<App/>);
+function AdminGate() {
+  const [state, setState] = useState('checking');
+  const [error, setError] = useState('');
+  const [accountEmail, setAccountEmail] = useState('');
+  useEffect(() => onAuthStateChanged(auth, async user => {
+    setAccountEmail(user && !user.isAnonymous ? user.email || '' : '');
+    if (!user || user.isAnonymous) { setState('signed-out'); return; }
+    try {
+      const token = await getIdTokenResult(user, true);
+      setState(token.claims.admin === true ? 'admin' : 'denied');
+    } catch (e) { setError(e.message); setState('denied'); }
+  }), []);
+  if (state === 'admin') return <App/>;
+  return <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6"><div className="max-w-md w-full rounded-2xl bg-white p-7 shadow-lg text-center">
+    <h1 className="text-xl font-bold text-slate-800">Seed Admin</h1>
+    <p className="mt-3 text-sm text-slate-600">{state === 'checking' ? 'กำลังตรวจสอบสิทธิ์…' : state === 'denied' ? 'บัญชีนี้ไม่มีสิทธิ์ผู้ดูแลระบบ' : 'เข้าสู่ระบบผู้ดูแลก่อนใช้งาน'}</p>
+    {state === 'denied' && accountEmail && <p className="mt-2 text-xs text-slate-500">{accountEmail}</p>}
+    {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+    {state !== 'checking' && <button onClick={async () => { setError(''); try { const provider = new GoogleAuthProvider(); provider.setCustomParameters({ prompt: 'select_account' }); await signInWithPopup(auth, provider); } catch (e) { setError(e.message); } }} className="mt-5 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white">เข้าสู่ระบบด้วย Google</button>}
+  </div></div>;
+}
+createRoot(document.getElementById('root')).render(<AdminGate/>);
 </script>
 </body>
 </html>
