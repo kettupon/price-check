@@ -3,6 +3,12 @@
 
 <head>
     <meta charset="UTF-8">
+    <!-- Local reviewed imports open a Firebase-free consumer; the public feed stays separate. -->
+    <script>
+        if (new URLSearchParams(location.search).get('makro') === 'local') {
+            location.replace(new URL('makro-review-app/preview.html', location.href).href);
+        }
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>DealHunter — เปรียบเทียบราคาและค้นหาดีล</title>
     <meta name="description" content="เปรียบเทียบราคาและราคาต่อหน่วย ค้นหาดีลจากหลายร้านในที่เดียว">
@@ -137,8 +143,10 @@
       }
     </script>
     <script src="https://unpkg.com/@babel/standalone@7.26.10/babel.min.js"></script>
-    <script src="pricing.js"></script>
-    <script src="deal-comparison.js"></script>
+    <script src="pricing.js?v=20260920-units"></script>
+    <script src="deal-comparison.js?v=20260920-missing-size"></script>
+    <script src="family-offers.js?v=20260920"></script>
+    <script src="posting-units.js?v=1"></script>
 </head>
 
 <body class="bg-stone-100">
@@ -1050,6 +1058,25 @@
             );
         };
 
+        const FamilyOffers = ({ offers, includeShipping, onSelect }) => {
+            const result = window.DealHunterFamilyOffers.summarize(offers, includeShipping);
+            const money = value => value.toLocaleString('th-TH', {minimumFractionDigits:2, maximumFractionDigits:2});
+            const renderOffer = (row, index) => <button type="button" key={row.offer.id || index} onClick={event => { event.stopPropagation(); onSelect(row.offer); }} className="w-full text-left rounded-xl border border-green-100 bg-white p-3 min-w-0" data-testid="family-offer">
+                {row.badges && <div className="flex flex-wrap gap-1 mb-2">{row.badges.map(badge => <span key={badge} className="rounded-full bg-green-100 text-green-800 text-[10px] font-bold px-2 py-1">{badge}</span>)}</div>}
+                <p className="text-xs font-bold text-slate-800 break-words">{row.offer.name}</p>
+                <p className="text-xs text-slate-600 mt-1">{row.size}</p>
+                <p className="text-xs text-slate-600">{row.offer.shop || row.offer.store || 'ไม่ระบุร้าน'}</p>
+                <p className="text-lg font-bold text-green-800 mt-1">฿{money(row.total)} <span className="text-[10px] font-normal">/ แพ็ก</span></p>
+                <p className="text-xs text-slate-700">{row.unitPrice === null ? 'ยังคำนวณราคาต่อหน่วยไม่ได้' : `฿${money(row.unitPrice)} / 100 ${row.kind === 'weight' ? 'g' : 'ml'}`}</p>
+                <p className="text-[10px] text-slate-500 mt-2 leading-relaxed">{row.conditions.join(' · ')}</p>
+            </button>;
+            return <section className="space-y-2" aria-label="ข้อเสนอเด่น" onClick={event => event.stopPropagation()}>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" data-testid="family-highlights">{result.highlights.map(renderOffer)}</div>
+                <p className="text-[10px] text-slate-500 leading-relaxed">{result.note}</p>
+                <details className="rounded-xl border border-slate-200 bg-white p-3"><summary className="cursor-pointer text-xs font-bold text-green-700">See all sizes · ดูทุกขนาดและข้อเสนอ ({result.rows.length})</summary><div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">{result.rows.map(renderOffer)}</div></details>
+            </section>;
+        };
+
         const StoreComparisonModal = ({ offers, title, onClose }) => {
             const options = useMemo(() => window.DealHunterComparison.settings(offers), [offers]);
             const [basis, setBasis] = useState(options[0]?.key || '');
@@ -1090,6 +1117,7 @@
                                         <select aria-label="เปรียบเทียบตาม" value={basis} onChange={e => { const next = options.find(option => option.key === e.target.value); setBasis(next.key); }} className="block mt-1 w-full rounded-xl border border-slate-200 bg-white p-2.5 text-sm">{options.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}</select>
                                     </label>
                                 </div>
+                                {setting?.key.startsWith('count:') && <p className="text-xs text-amber-700">เปรียบเทียบต่อจำนวนเท่านั้น ขนาดแต่ละร้านอาจต่างกัน หากไม่มีข้อมูลขนาด จะยังบอกไม่ได้ว่าร้านใดถูกกว่าต่อปริมาตรหรือน้ำหนัก</p>}
                                 <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={shipping} onChange={e => setShipping(e.target.checked)} className="accent-green-600 w-4 h-4" /> รวมค่าส่ง</label>
                                 <p className="text-[11px] leading-relaxed text-slate-500">เรียงจากราคาต่อ 1 {setting?.unit} ที่ถูกที่สุด · ใช้ปริมาณรวมจริงของแต่ละโพสต์ หักแคชแบ็กตามโพสต์</p>
                             </div>
@@ -1109,7 +1137,15 @@
                                     </tr>)}</tbody>
                                 </table>
                             )}
-                            <div className="p-4 text-[11px] text-slate-500 leading-relaxed space-y-1"><p>แสดงทุกร้านและทุกขนาด/รุ่น จากโพสต์ล่าสุดของแต่ละรายการ · ส่วนต่างเทียบกับราคาต่อหน่วยที่ถูกที่สุด</p>{result.excluded > 0 && <p>ไม่รวม {result.excluded} โพสต์ที่ไม่มีข้อมูลหรือใช้หน่วยต่างกัน</p>}</div>
+                            {result.unranked.length > 0 && <section className="m-4 rounded-xl border border-amber-200 bg-amber-50/50 overflow-hidden" aria-label="รายการที่ยังจัดอันดับไม่ได้">
+                                <h3 className="px-3 py-3 text-sm font-bold text-amber-800">ยังจัดอันดับไม่ได้ ({result.unranked.length})</h3>
+                                <p className="px-3 pb-3 text-xs text-amber-700">แสดงราคาที่โพสต์ไว้ แต่ไม่นำมาเทียบต่อปริมาตรหรือน้ำหนักเมื่อข้อมูลไม่ครบหรือหน่วยต่างกัน</p>
+                                {result.unranked.map((row,index) => <div key={row.offer.id || index} className="border-t border-amber-100 px-3 py-3 flex items-start justify-between gap-3">
+                                    <div className="min-w-0"><p className="text-sm font-semibold text-slate-700 break-words">{row.store}</p><p className="text-xs text-slate-500 break-words">{row.offer.name}</p><p className="text-xs text-amber-700 mt-1">{row.reason}</p></div>
+                                    <div className="text-right flex-shrink-0"><p className="text-sm font-bold text-slate-700">฿{money(row.packPrice)}</p><p className="text-[10px] text-slate-500">ราคารวมตามโพสต์</p></div>
+                                </div>)}
+                            </section>}
+                            <div className="p-4 text-[11px] text-slate-500 leading-relaxed space-y-1"><p>แสดงทุกร้านและทุกขนาด/รุ่น จากโพสต์ล่าสุดของแต่ละรายการ · ส่วนต่างเทียบกับราคาต่อหน่วยที่ถูกที่สุด</p>{result.excluded > 0 && <p>แยกแสดง {result.excluded} โพสต์ที่ยังจัดอันดับไม่ได้</p>}</div>
                         </div>
                     </section>
                 </div>, document.body
@@ -1149,8 +1185,6 @@
             const searchResultCountRef = useRef(0);
             const searchCache = useRef({});
             const [selectedProduct, setSelectedProduct] = useState(null);
-            const [purchaseQuantity, setPurchaseQuantity] = useState(1);
-            const [purchaseUnit, setPurchaseUnit] = useState('items');
             const [comparisonBasis, setComparisonBasis] = useState('items');
             const [showStoreComparison, setShowStoreComparison] = useState(false);
             const [showAllVariants, setShowAllVariants] = useState(false);
@@ -1537,31 +1571,27 @@
                 return categories.filter(c => (c.items || []).includes(productName)).map(c => c.name);
             };
 
-            const formatUnitDetail = (deal) => {
-                const subMode = deal.subUnitMode || 'one';
-                const qtyType = subMode === 'many' ? `${deal.unitQuantity} หน่วยซื้อ` : `${deal.unitQuantity} ${deal.unitType}`;
-                if (subMode === 'many') {
-                    const hasSize = deal.subUnitSize;
-                    const countStr = `มี ${deal.subUnitCount || 0} ${deal.subUnit}`;
-                    if (deal.subUnitEqual && hasSize) {
-                        return `${qtyType} (${countStr} x ${deal.subUnitSize} ${deal.subUnitSizeType || ''})`;
-                    } else if (!deal.subUnitEqual && hasSize) {
-                        return `${qtyType} (${countStr} รวม ${deal.subUnitSize} ${deal.subUnitSizeType || ''})`;
-                    } else {
-                        return `${qtyType} (${countStr})`;
-                    }
-                } else if (subMode === 'one') {
-                    if (deal.subUnitSize && (deal.subUnitCategory === 'volume' || deal.subUnitCategory === 'weight' || deal.subUnitCategory === 'custom')) {
-                        return `${qtyType} (${deal.subUnitSize} ${deal.subUnitSizeType || ''})`;
-                    }
+            const formatUnitDetail = (deal, purchasePacks = 1) => {
+                const number = value => Number(value).toLocaleString('th-TH', {maximumFractionDigits: 3});
+                const count = (Number(deal.unitQuantity) || 1) * purchasePacks;
+                const innerUnit = deal.subUnit || deal.unitType || 'ชิ้น';
+                const hasSize = Number(deal.subUnitSize) > 0 && ['volume', 'weight', 'custom'].includes(deal.subUnitCategory);
+                const sizeUnit = window.DealHunterPricing.normalizeUnit(deal.subUnitSizeType);
+                if (deal.subUnitMode === 'many') {
+                    const outerUnit = deal.purchaseUnitType && deal.purchaseUnitType !== innerUnit ? deal.purchaseUnitType : 'หน่วยซื้อ';
+                    const quantity = `${number(count)} ${outerUnit} × ${number(deal.subUnitCount || 1)} ${innerUnit}`;
+                    if (hasSize && deal.subUnitEqual) return `${quantity} × ${number(deal.subUnitSize)} ${sizeUnit}`;
+                    if (hasSize) return `${quantity} (รวม ${number(Number(deal.subUnitSize) * count)} ${sizeUnit})`;
+                    return quantity;
                 }
-                return qtyType;
+                return `${number(count)} ${innerUnit}${hasSize ? ` × ${number(deal.subUnitSize)} ${sizeUnit}` : ''}`;
             };
 
             // Firebase Fetch
             useEffect(() => {
                 const q = query(collection(db, "items"), orderBy("lastUpdated", "desc"));
                 const unsubscribe = onSnapshot(q, (snapshot) => {
+                    try {
                     setFeedError(false);
                     const fbDeals = snapshot.docs
                         .filter(doc => doc.data().deleted !== true && (doc.data().status || "active") !== "hidden")
@@ -1576,7 +1606,7 @@
                             const subMode = data.subUnitMode || 'one';
                             const subUnitCount = parseInt(data.subUnitCount) || 1;
                             const subUnitSize = data.subUnitSize || null;
-                            const subUnitSizeType = window.DealHunterPricing.normalizeUnit(data.subUnitSizeType || 'ml');
+                            const subUnitSizeType = window.DealHunterPricing.normalizeUnit(data.subUnitSizeType || '');
                             const subUnitCategory = data.subUnitCategory || window.DealHunterPricing.unitInfo(data.subUnitSizeType)?.category || null;
                             const subUnitEqual = data.subUnitEqual;
 
@@ -1605,7 +1635,7 @@
                             return {
                                 id: doc.id, name: data.name, brand: data.brand || "",
                                 price: data.price, ppu, ppuVolume, ppuWithShipping, ppuVolumeWithShipping, totalPrice,
-                                unitQuantity: unitQty, unitType: subUnit, // keep backward compat
+                                unitQuantity: unitQty, unitType: subUnit, purchaseUnitType: data.unitType || '', // preserve recorded outer unit
                                 subUnit, subUnitMode: subMode, subUnitCount, subUnitSize, subUnitSizeType, subUnitCategory, subUnitEqual, totalVolume,
                                 normalPrice: Math.round(data.price * 1.2),
                                 shop: data.store || "ไม่ระบุร้าน", distance: "? km",
@@ -1617,6 +1647,8 @@
                                 reporter: "Live User",
                                 cashbackUsed: data.cashbackUsed || false,
                                 tags: data.tags || [],
+                                recordedShippingType: data.shippingType || 'unknown',
+                                recordedShippingFee: data.shippingFee ?? null,
                                 shippingType: data.shippingType || 'included',
                                 shippingFee: data.shippingFee || 0,
                                 isMemberPrice: data.isMemberPrice || false,
@@ -1631,15 +1663,9 @@
                                 status: data.status || "active",
                                 canonicalProductId: data.canonicalProductId || null,
                                 priceTiers: Array.isArray(data.priceTiers) ? data.priceTiers : [],
-                                lastUpdated: data.lastUpdated?.toMillis?.() || data.lastUpdated || Date.now(),
-                                store: data.store
+                                lastUpdated: data.lastUpdated?.toMillis?.() || data.lastUpdated || Date.now()
                             };
-                        })
-                        .filter(item => 
-                            item.status !== 'catalog' &&
-                            item.store && item.store !== '' &&
-                            item.price && parseFloat(item.price) > 0
-                        );
+                        });
                     setDeals(fbDeals);
                     setFeedLoaded(true);
 
@@ -1651,6 +1677,7 @@
                             grouped[groupKey] = {
                                 id: deal.id, name, canonicalProductId: deal.canonicalProductId, brand: deal.brand, status: deal.status,
                                 masterImage: deal.masterImage || deal.image,
+                                hasMasterImage: Boolean(deal.masterImage),
                                 lowestPrice: deal.price, lowestPpu: deal.ppu, lowestPpuVolume: deal.ppuVolume,
                                 lowestPpuWithShipping: deal.ppuWithShipping, lowestPpuVolumeWithShipping: deal.ppuVolumeWithShipping,
                                 lowestPpuUnit: deal.unitType, lowestPpuVolumeUnit: `100${deal.subUnitSizeType || 'ml'}`,
@@ -1673,8 +1700,9 @@
                             if (deal.ppuVolumeWithShipping !== null) {
                                 grouped[groupKey].lowestPpuVolumeWithShipping = grouped[groupKey].lowestPpuVolumeWithShipping === null ? deal.ppuVolumeWithShipping : Math.min(grouped[groupKey].lowestPpuVolumeWithShipping, deal.ppuVolumeWithShipping);
                             }
-                            if (deal.masterImage && (!grouped[groupKey].masterImage || grouped[groupKey].masterImage === grouped[groupKey].image)) {
+                            if (deal.masterImage && !grouped[groupKey].hasMasterImage) {
                                 grouped[groupKey].masterImage = deal.masterImage;
+                                grouped[groupKey].hasMasterImage = true;
                             }
                             if (deal.description && !grouped[groupKey].description) grouped[groupKey].description = deal.description;
                             if (deal.tags && deal.tags.length > 0) {
@@ -1682,8 +1710,15 @@
                             }
                         }
                     });
-                    setGroupedDeals(Object.values(grouped));
+                    const nextGroups = Object.values(grouped);
+                    setGroupedDeals(nextGroups);
+                    setSelectedProduct(previous => previous ? nextGroups.find(group => previous.canonicalProductId ? group.canonicalProductId === previous.canonicalProductId : !group.canonicalProductId && group.name === previous.name) || previous : previous);
                     searchCache.current = {}; // Invalidate cache on new data
+                    } catch (error) {
+                        console.error('Price feed could not be displayed:', error);
+                        setFeedError(true);
+                        setFeedLoaded(true);
+                    }
                 }, error => {
                     console.error('Price feed unavailable:', error);
                     setFeedError(true);
@@ -1908,15 +1943,26 @@
             };
             const removeTag = (tagToRemove) => setTags(tags.filter(t => t !== tagToRemove));
 
+            const validatePostUnits = (checkWarning = true) => {
+                const result = window.DealHunterPostingUnits.validate({unit, subUnit, subUnitMode, subUnitCount, subUnitCategory, subUnitSizeType, subUnitSize, subUnitEqual, subUnitSizes});
+                if (result.error) {
+                    const section = document.querySelector('[data-testid="quantity-details"]');
+                    if (section) { section.open = true; section.scrollIntoView({block:'center', behavior:'smooth'}); }
+                    alert(result.error); return false;
+                }
+                return !checkWarning || !result.warning || confirm(result.warning);
+            };
             const handleSaveDeal = () => {
+                if (!brand.trim()) { alert('กรุณาระบุยี่ห้อสินค้า'); document.getElementById('post-brand')?.focus(); return; }
                 if (!itemName || !price) { alert('กรุณากรอกชื่อสินค้าและราคา'); return; }
                 if (!store || !store.trim()) { alert('กรุณาเลือกหรือระบุชื่อร้านค้า'); return; }
+                if (!validatePostUnits()) return;
                 setShowConfirmModal(true);
             };
 
             const resetAddDealForm = () => {
                 setItemName(''); setBrand(''); setPrice(''); setUnit(1); setUnitDisplay('1'); setStore('');
-                setSubUnit('ชิ้น'); setSubUnitCount(1); setSubUnitSize(''); setSubUnitSizeType('ml'); setSubUnitMode(null); setSubUnitCategory(null); setSubUnitEqual(null); setSubUnitSizes([]);
+                setSubUnit('ชิ้น'); setSubUnitCount(1); setSubUnitSize(''); setSubUnitSizeType('ml'); setSubUnitMode(null); setSubUnitCategory(null); setSubUnitEqual(null); setSubUnitSize(''); setSubUnitSizes([]); setSubUnitSizes([]);
                 setUseCashback(false); setCashbackAmount(''); setUsePromo(false); setPromoCode('');
                 setIsMemberPrice(false); setProductUrl('');
                 setImageBase64(null); setTags([]); setTagInput(''); setShippingType('included');
@@ -1925,12 +1971,14 @@
             };
 
             const executeSaveDeal = async () => {
+                if (!validatePostUnits(false)) { setShowConfirmModal(false); return; }
+                if (!brand.trim()) { alert('กรุณาระบุยี่ห้อสินค้า'); setShowConfirmModal(false); return; }
                 const activeUser = await ensureAuth();
                 if (!activeUser) return;
 
                 try {
                     const docRef = await addDoc(collection(db, "items"), {
-                        name: itemName, brand, store: resolveStoreName(store),
+                        name: itemName, brand: brand.trim(), store: resolveStoreName(store),
                         price: parseFloat(price), shippingType,
                         shippingFee: shippingType === 'excluded' ? (parseFloat(shippingFee) || 0) : 0,
                         unitQuantity: parseInt(unit) || 1,
@@ -1938,12 +1986,12 @@
                         subUnit: subUnit || 'ชิ้น',
                         subUnitMode: subUnitMode || 'one',
                         subUnitCount: parseInt(subUnitCount) || 1,
-                        subUnitSize: !subUnitEqual && subUnitSizes.length > 0
+                        subUnitSize: subUnitCategory === 'none' ? null : !subUnitEqual && subUnitSizes.length > 0
                             ? subUnitSizes.reduce((acc, s) => acc + (parseFloat(s.size) || 0), 0)
                             : (subUnitSize ? parseFloat(subUnitSize) : null),
-                        subUnitSizeType: subUnitSizeType || null,
+                        subUnitSizeType: subUnitCategory === 'none' ? null : window.DealHunterPricing.normalizeUnit(subUnitSizeType) || null,
                         subUnitCategory: subUnitCategory || 'none',
-                        subUnitSizes: !subUnitEqual && subUnitSizes.length > 0 ? subUnitSizes : null,
+                        subUnitSizes: subUnitCategory !== 'none' && subUnitMode === 'many' && subUnitEqual === false && subUnitSizes.length > 0 ? subUnitSizes : null,
                         subUnitEqual: subUnitEqual ?? null,
                         totalVolume: totalVolume || null,
                         ppuVolume: ppuVolume || null,
@@ -2046,82 +2094,11 @@
 
                 // ── Variant showcase card (like Shopee brand banner) ──
                 if (vg && vg.items.length >= 2) {
-                    // Get all variant deals that have images, pick 2 random
-                    const allVariantDeals = vg.items
-                        .map(itemName => groupedDeals.find(gd => gd.name === itemName))
-                        .filter(Boolean);
-                    const withImages = allVariantDeals.filter(d => d.masterImage);
-                    const pool = withImages.length >= 2 ? withImages : allVariantDeals;
-                    // Sort and pick 2 worthest
-                    const sorted = [...pool].sort((a, b) => {
-                        let valA = a.lowestPpu || Infinity;
-                        let valB = b.lowestPpu || Infinity;
-                        if (showVolumeInFeed) {
-                            if (a.lowestPpuVolume) valA = a.lowestPpuVolume;
-                            if (b.lowestPpuVolume) valB = b.lowestPpuVolume;
-                        }
-                        if (showShippingInFeed) {
-                            valA = (showVolumeInFeed && a.lowestPpuVolumeWithShipping) ? a.lowestPpuVolumeWithShipping : (a.lowestPpuWithShipping || valA);
-                            valB = (showVolumeInFeed && b.lowestPpuVolumeWithShipping) ? b.lowestPpuVolumeWithShipping : (b.lowestPpuWithShipping || valB);
-                        }
-                        return valA - valB;
-                    });
-                    const display2 = sorted.slice(0, 2);
-                    // Find cheapest price across all variants
-                    const cheapestPrice = Math.min(...allVariantDeals.map(d => d.lowestPpu || Infinity));
-                    const cheapestDeal = allVariantDeals.find(d => d.lowestPpu === cheapestPrice) || deal;
-
-                    return (
-                        <div key={deal.id + '-vg'}
-                            onClick={() => { setSelectedProduct(deal); setShowAllVariants(true); setIsDescriptionExpanded(false); setCurrentView('product_detail'); }}
-                            className="col-span-2 rounded-2xl overflow-hidden shadow-md hover:shadow-lg transition-shadow cursor-pointer border border-red-100 bg-gradient-to-br from-red-500 via-red-600 to-orange-500 relative">
-                            {/* ── Banner header ── */}
-                            <div className="flex items-center justify-between px-4 py-3">
-                                <div className="flex items-center gap-3 min-w-0">
-                                    {deal.masterImage ? (
-                                        <img src={deal.masterImage} alt={deal.brand || vg.name} className="w-10 h-10 rounded-xl object-cover bg-white shadow-md flex-shrink-0 border-2 border-white/30" />
-                                    ) : (
-                                        <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0 shadow-md border-2 border-white/30">
-                                            <Package size={18} className="text-white/80" />
-                                        </div>
-                                    )}
-                                    <div className="min-w-0">
-                                        <div className="text-white font-black text-base leading-tight truncate">{vg.name || deal.brand || deal.name}</div>
-                                        <div className="text-white/80 text-xs font-bold mt-0.5">เริ่มต้น ฿{cheapestPrice === Infinity ? deal.lowestPpu?.toFixed(0) : cheapestPrice.toFixed(0)}.-</div>
-                                    </div>
-                                </div>
-                                <ChevronRight size={22} className="text-white/70 flex-shrink-0" />
-                            </div>
-                            {/* ── 2 variant thumbnails ── */}
-                            <div className="flex gap-2.5 px-3 pb-3">
-                                {display2.map((vDeal, i) => (
-                                    <div key={vDeal.id || i} className="flex-1 bg-white rounded-xl overflow-hidden shadow-sm">
-                                        <div className="aspect-square bg-gray-50 relative">
-                                            {vDeal.masterImage ? (
-                                                <img src={vDeal.masterImage} alt={vDeal.name} className="w-full h-full object-cover" />
-                                            ) : <ImagePlaceholder />}
-                                        </div>
-                                        <div className="p-2 text-center">
-                                            <div className="text-[10px] text-gray-500 font-medium leading-tight line-clamp-1 mb-1">{vDeal.name}</div>
-                                            <div className={`text-base font-black ${showVolumeInFeed && vDeal.lowestPpuVolume ? 'text-blue-600' : 'text-gray-800'}`}>
-                                                ฿{(() => {
-                                                    if (showVolumeInFeed && vDeal.lowestPpuVolume) {
-                                                        return showShippingInFeed ? vDeal.lowestPpuVolumeWithShipping?.toFixed(0) : vDeal.lowestPpuVolume?.toFixed(0);
-                                                    }
-                                                    return showShippingInFeed ? vDeal.lowestPpuWithShipping?.toFixed(0) : vDeal.lowestPpu?.toFixed(0);
-                                                })() || '?'}
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                            {/* ── Bottom info ── */}
-                            <div className="bg-red-700/40 px-4 py-1.5 flex items-center justify-between text-[10px]">
-                                <span className="text-white/80 font-bold">{allVariantDeals.length} ตัวเลือก · {allVariantDeals.reduce((sum, d) => sum + (d.postsCount || 0), 0)} โพสต์</span>
-                                {deal.brand && <span className="text-white/70 font-bold bg-white/15 px-2 py-0.5 rounded">{deal.brand}</span>}
-                            </div>
-                        </div>
-                    );
+                    const familyOffers = deals.filter(offer => vg.items.includes(offer.name));
+                    return <div key={deal.id + '-vg'} className="col-span-2 rounded-2xl border border-green-100 bg-white p-3 shadow-sm">
+                        <button className="text-left w-full mb-3" onClick={() => { setSelectedProduct(deal); setShowAllVariants(true); setIsDescriptionExpanded(false); setCurrentView('product_detail'); }}><h3 className="font-bold text-slate-800">{vg.name || deal.name}</h3><span className="text-xs text-green-700">ดูรายละเอียดสินค้า →</span></button>
+                        <FamilyOffers offers={familyOffers} includeShipping={showShippingInFeed} onSelect={setSelectedDealDetail} />
+                    </div>;
                 }
 
                 // ── Regular product card (no variants) ──
@@ -2805,6 +2782,7 @@
                 );
             };
 
+            const isBrandLocked = isItemLocked && uniqueProductsWithBrand.some(product => product.name === itemName && product.brand?.trim());
             const renderAddDeal = () => (
                 <div className="flex-1 flex flex-col bg-white overflow-hidden animate-fade-in relative z-0 pb-20">
                     {/* Reference images strip from tip-off pre-fill */}
@@ -2822,7 +2800,7 @@
                     <div className="flex-none bg-white border-b border-gray-100 px-4 py-3">
                         <div className="flex items-center gap-2">
                             <button onClick={() => { setCurrentView('feed'); setIsItemLocked(false); }} aria-label="กลับหน้าแรก" className="p-2 -ml-2 text-gray-500"><ChevronLeft size={20} /></button>
-                            <div className="flex-1 min-w-0"><h2 className="text-sm sm:text-base font-bold text-gray-800">บอกต่อราคา</h2><p className="text-[10px] text-gray-400">ชื่อสินค้า ร้านค้า และราคา</p></div>
+                            <div className="flex-1 min-w-0"><h2 className="text-sm sm:text-base font-bold text-gray-800">บอกต่อราคา</h2><p className="text-[10px] text-gray-400">สินค้า ยี่ห้อ ร้านค้า และราคา</p></div>
                             <div className="min-w-0 max-w-[45%] rounded-xl border border-orange-100 bg-orange-50 px-3 py-2 text-center" data-testid="fixed-post-ppu" role="status" aria-label="ราคาต่อหน่วย">
                                 <div className="text-[9px] font-semibold text-orange-500">ราคาต่อหน่วย · PPU</div>
                                 <div className="text-lg font-bold leading-tight text-orange-600 tabular-nums break-all">฿{(ppuVolume !== null ? ppuVolume : ppu).toFixed(2)}</div>
@@ -2947,11 +2925,11 @@
                             </div>
                         <div className="col-span-2 grid grid-cols-2 gap-3 items-start" data-testid="brand-tags-row">
                         <div className="space-y-1.5 relative min-w-0">
-                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">ยี่ห้อ · ไม่บังคับ {isItemLocked && '(Locked)'}</label>
-                            <input type="text" placeholder="เช่น Scott, Mizumi" value={brand} onChange={(e) => setBrand(e.target.value)}
-                                disabled={isItemLocked}
-                                className={`w-full h-11 px-3 rounded-xl text-sm font-semibold border-2 transition-all outline-none ${isItemLocked ? 'bg-gray-100 text-gray-500 border-gray-100' : 'bg-gray-50 text-gray-800 border-transparent focus:border-green-500'}`} />
-                            {brand && !isItemLocked && (() => {
+                            <label htmlFor="post-brand" className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">ยี่ห้อ <span className="text-red-500">*</span> {isBrandLocked && '(Locked)'}</label>
+                            <input id="post-brand" required aria-required="true" type="text" placeholder="เช่น Scott, Mizumi" value={brand} onChange={(e) => setBrand(e.target.value)}
+                                disabled={isBrandLocked}
+                                className={`w-full h-11 px-3 rounded-xl text-sm font-semibold border-2 transition-all outline-none ${isBrandLocked ? 'bg-gray-100 text-gray-500 border-gray-100' : 'bg-gray-50 text-gray-800 border-transparent focus:border-green-500'}`} />
+                            {brand && !isBrandLocked && (() => {
                                 const q = brand.toLowerCase().trim();
                                 const uniqueBrands = [...new Set(uniqueProductsWithBrand.map(p => p.brand).filter(Boolean))];
                                 const suggestions = uniqueBrands.filter(b => b.toLowerCase() !== q && b.toLowerCase().includes(q)).slice(0, 3);
@@ -2987,6 +2965,8 @@
                             <details className="col-span-2 rounded-xl border border-gray-200" data-testid="quantity-details">
                                 <summary className="px-3 py-3 text-sm font-semibold text-gray-700 cursor-pointer">จำนวนและขนาด <span className="text-xs font-normal text-gray-400">· {subUnitMode === 'many' ? `${subUnitCount} ${subUnit}` : `1 ${subUnit}`}{subUnitSize ? ` · ${subUnitSize} ${subUnitSizeType}` : ' · เพิ่มขนาดเพื่อเทียบราคา'}</span></summary>
                             <div className="p-3 pt-0 space-y-3">
+                                <button type="button" onClick={() => { setSubUnitMode('one'); setSubUnitCount(1); setSubUnitCategory('none'); setSubUnitSize(''); setSubUnitSizes([]); setSubUnitEqual(null); }} className="w-full rounded-xl border border-green-200 bg-green-50 p-3 text-xs text-green-700 font-semibold">ขายเป็น 1 {subUnit || 'ชิ้น'} / ไม่ทราบขนาด</button>
+                                <p className="text-xs text-gray-500">หากฉลากมีขนาด โปรดระบุเพื่อเทียบราคา หากไม่ทราบ เลือกไม่ระบุได้ โดยจะเทียบเฉพาะราคาต่อชิ้น</p>
                                 <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">
                                     จำนวน / หน่วย
                                 </label>
@@ -3022,7 +3002,7 @@
                                     {/* Step 1 choice buttons */}
                                     <div className="grid grid-cols-2 gap-2">
                                         <button type="button"
-                                            onClick={() => { setSubUnitMode('one'); setSubUnitCount(1); setSubUnitCategory(null); setSubUnitEqual(null); }}
+                                            onClick={() => { setSubUnitMode('one'); setSubUnitCount(1); setSubUnitCategory(null); setSubUnitEqual(null); setSubUnitSize(''); setSubUnitSizes([]); }}
                                             className={`py-3 rounded-xl border-2 font-bold text-xs transition-all ${subUnitMode === 'one'
                                                 ? 'border-green-400 bg-green-50 text-green-600'
                                                 : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-green-200'
@@ -3030,7 +3010,7 @@
                                             1 {subUnit}
                                         </button>
                                         <button type="button"
-                                            onClick={() => { setSubUnitMode('many'); setSubUnitCount(2); setSubUnitCategory(null); setSubUnitEqual(null); }}
+                                            onClick={() => { setSubUnitMode('many'); setSubUnitCount(2); setSubUnitCategory(null); setSubUnitEqual(null); setSubUnitSize(''); setSubUnitSizes([]); }}
                                             className={`py-3 rounded-xl border-2 font-bold text-xs transition-all ${subUnitMode === 'many'
                                                 ? 'border-green-400 bg-green-50 text-green-600'
                                                 : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-green-200'
@@ -3054,7 +3034,7 @@
                                                 { key: 'none', label: 'ไม่ระบุ', sub: `฿/${subUnit}` },
                                             ].map(({ key, label, sub }) => (
                                                 <button key={key} type="button"
-                                                    onClick={() => setSubUnitCategory(key)}
+                                                    onClick={() => { setSubUnitCategory(key); setSubUnitSize(''); setSubUnitSizes([]); setSubUnitSizeType(key === 'weight' ? 'g' : key === 'volume' ? 'ml' : ''); }}
                                                     className={`py-2.5 rounded-xl border-2 font-bold text-[10px] leading-tight transition-all flex flex-col items-center gap-0.5 ${subUnitCategory === key
                                                         ? 'border-blue-400 bg-blue-50 text-blue-600'
                                                         : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-blue-200'
@@ -3165,7 +3145,7 @@
                                                         { key: 'none', label: 'ไม่ระบุ' },
                                                     ].map(({ key, label }) => (
                                                         <button key={key} type="button"
-                                                            onClick={() => setSubUnitCategory(key)}
+                                                            onClick={() => { setSubUnitCategory(key); setSubUnitSize(''); setSubUnitSizes([]); setSubUnitSizeType(key === 'weight' ? 'g' : key === 'volume' ? 'ml' : ''); }}
                                                             className={`py-2 rounded-xl border-2 font-bold text-[10px] transition-all ${subUnitCategory === key
                                                                 ? 'border-blue-400 bg-blue-50 text-blue-600'
                                                                 : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-blue-200'
@@ -3235,7 +3215,7 @@
                                                             { key: 'none', label: 'ไม่ระบุ' },
                                                         ].map(({ key, label }) => (
                                                             <button key={key} type="button"
-                                                                onClick={() => setSubUnitCategory(key)}
+                                                                onClick={() => { setSubUnitCategory(key); setSubUnitSize(''); setSubUnitSizes([]); setSubUnitSizeType(key === 'weight' ? 'g' : key === 'volume' ? 'ml' : ''); }}
                                                                 className={`py-2 rounded-xl border-2 font-bold text-[10px] transition-all ${subUnitCategory === key
                                                                     ? 'border-orange-400 bg-orange-50 text-orange-600'
                                                                     : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-orange-200'
@@ -3464,12 +3444,7 @@
                                                 </div>
                                             )}
                                         </div>
-                                        <div className="mt-auto">
-                                            <div className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">คุ้มที่สุดตอนนี้</div>
-                                            <div className="text-xs text-orange-600 font-bold bg-orange-50 px-2 py-1.5 rounded-lg border border-orange-100 inline-block shadow-sm">
-                                                ฿{productDeals[0]?.ppu?.toFixed(2)} / {productDeals[0]?.unitType}
-                                            </div>
-                                        </div>
+
                                     </div>
                                 </div>
 
@@ -3478,6 +3453,8 @@
                                     {detailSizes.length > 1 && <p>ขนาดที่มี: {detailSizes.join(' · ')}</p>}
                                     <p className="mt-1 text-slate-400">เปรียบเทียบราคาต่อปริมาณเดียวกันได้ที่ Compare</p>
                                 </div>}
+
+                                <FamilyOffers offers={productDeals} includeShipping={showShippingInFeed} onSelect={setSelectedDealDetail} />
 
                                 {/* ── Description section ── */}
                                 {(() => {
@@ -3569,21 +3546,11 @@
                                 </div>
                                 {showStoreComparison && <StoreComparisonModal offers={productDeals} title={displayTitle} onClose={() => setShowStoreComparison(false)} />}
                                 <div className="rounded-xl bg-blue-50 border border-blue-100 px-3 py-3 mb-3 text-xs text-blue-900 space-y-2">
-                                    <div className="flex flex-wrap items-center gap-2 font-bold">
-                                        ต้องการซื้อ
-                                        <input type="number" min="1" max="9999" value={purchaseQuantity} onChange={e => setPurchaseQuantity(Math.min(9999, Math.max(1, Math.floor(Number(e.target.value) || 1))))} className="w-20 rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-right" />
-                                        <select value={purchaseUnit} onChange={e => setPurchaseUnit(e.target.value)} className="rounded-lg border border-blue-200 bg-white px-2 py-1.5"><option value="items">ชิ้น</option><option value="packs">แพ็ก</option></select>
-                                        <button onClick={() => { setPurchaseQuantity(1); setPurchaseUnit('items'); }} className="rounded-lg border border-blue-200 bg-white px-2 py-1.5">ซื้อ 1 ชิ้น</button>
-                                    </div>
                                     <div className="flex gap-2"><button onClick={() => setComparisonBasis('items')} className={`rounded-lg px-2 py-1.5 font-bold ${comparisonBasis === 'items' ? 'bg-blue-600 text-white' : 'bg-white text-blue-700'}`}>คุ้มสุดต่อชิ้น</button><button onClick={() => setComparisonBasis('measure')} className={`rounded-lg px-2 py-1.5 font-bold ${comparisonBasis === 'measure' ? 'bg-blue-600 text-white' : 'bg-white text-blue-700'}`}>คุ้มสุดตามน้ำหนัก/ปริมาตร</button></div>
                                 </div>
                                 <div className="space-y-3">
                                     {(() => {
-                                        const quote = deal => {
-                                            const itemsPerPack = window.DealHunterPricing.quote(deal, 1).itemsPerPack;
-                                            const packs = purchaseUnit === 'items' ? Math.ceil(purchaseQuantity / itemsPerPack) : purchaseQuantity;
-                                            return window.DealHunterPricing.quote(deal, packs, showShippingInFeed);
-                                        };
+                                        const quote = deal => window.DealHunterPricing.quote(deal, 1, showShippingInFeed);
                                         const score = deal => comparisonBasis === 'measure' ? (quote(deal).per100 ?? Infinity) : quote(deal).perItem;
                                         const activeDeals = productDeals.filter(d => (d.status ?? 'active') === 'active').sort((a, b) => score(a) - score(b));
                                         const expiredDeals = productDeals.filter(d => (d.status ?? 'active') === 'expired').sort((a, b) => b.lastUpdated - a.lastUpdated);
@@ -3613,7 +3580,7 @@
                                                         </div>
                                                         <div className="flex-1 flex justify-between items-start">
                                                             <div>
-                                                                <div className={`font-bold text-base ${isExpired ? 'text-[#9CA3AF]' : 'text-gray-800'}`}>฿{quote(deal).total.toFixed(2)} <span className="text-xs font-normal text-gray-500">ซื้อจริง {quote(deal).quantity} แพ็ก · {formatUnitDetail(deal)}</span></div>
+                                                                <div className={`font-bold text-base ${isExpired ? 'text-[#9CA3AF]' : 'text-gray-800'}`}>฿{quote(deal).total.toFixed(2)} <span className="text-xs font-normal text-gray-500">{formatUnitDetail(deal, quote(deal).quantity)}</span></div>
                                                                 {!isExpired && <div className="text-xs font-bold text-orange-500 mt-0.5">ตกชิ้นละ ฿{quote(deal).perItem.toFixed(2)}{quote(deal).per100 !== null && <span className="ml-2 text-blue-600">฿{quote(deal).per100.toFixed(2)}/{quote(deal).measureUnit}</span>}</div>}
                                                                 {quote(deal).activeTier?.minQuantity > 1 && <div className="text-[10px] font-bold text-blue-600">ราคาส่งเมื่อซื้อ {quote(deal).activeTier.minQuantity} แพ็กขึ้นไป · ฿{quote(deal).packPrice.toFixed(2)}/แพ็ก</div>}
                                                                 <div className="flex flex-wrap gap-1 mt-1">
@@ -3646,7 +3613,6 @@
                                                             </div>
                                                         </div>
                                                     </div>
-                                                    <button onClick={e => { e.stopPropagation(); setSelectedDealDetail(deal); }} className="self-start rounded-lg bg-green-600 px-3 py-1.5 text-xs font-bold text-white">ดูรายละเอียด</button>
 
                                                     <CommentSection
                                                         itemId={deal.id}
