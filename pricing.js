@@ -1,7 +1,22 @@
 (function (root) {
   'use strict';
 
-  const BASE_FACTOR = { ml: 1, cc: 1, L: 1000, 'ลิตร': 1000, g: 1, 'กรัม': 1, kg: 1000, 'กก': 1000 };
+  const UNIT_ALIASES = {
+    ml: 'ml', 'มล': 'ml', 'มิลลิลิตร': 'ml', milliliter: 'ml', milliliters: 'ml', millilitre: 'ml', millilitres: 'ml', cc: 'ml', 'ซีซี': 'ml',
+    l: 'L', 'ลิตร': 'L', liter: 'L', liters: 'L', litre: 'L', litres: 'L',
+    g: 'g', 'กรัม': 'g', gram: 'g', grams: 'g',
+    kg: 'kg', 'กก': 'kg', 'กิโลกรัม': 'kg', kilogram: 'kg', kilograms: 'kg'
+  };
+  function normalizeUnit(value) {
+    const original = String(value ?? '').trim();
+    const key = original.toLowerCase().replace(/[.\s]/g, '');
+    return UNIT_ALIASES[key] || original;
+  }
+  function unitInfo(value) {
+    const unit = normalizeUnit(value);
+    const factor = {ml: 1, L: 1000, g: 1, kg: 1000}[unit];
+    return factor ? {unit, factor, category: unit === 'ml' || unit === 'L' ? 'volume' : 'weight'} : null;
+  }
   const positive = value => {
     const n = Number(value);
     return Number.isFinite(n) && n > 0 ? n : 0;
@@ -25,8 +40,9 @@
     const subCount = offer.subUnitMode === 'many' ? (positive(offer.subUnitCount) || 1) : 1;
     const itemsPerPack = unitQuantity * subCount;
     const size = positive(offer.subUnitSize);
-    const factor = BASE_FACTOR[offer.subUnitSizeType] || 0;
-    const hasMeasure = ['volume', 'weight'].includes(offer.subUnitCategory) && size > 0 && factor > 0;
+    const measurement = unitInfo(offer.subUnitSizeType);
+    const factor = measurement?.factor || 0;
+    const hasMeasure = measurement && (!offer.subUnitCategory || offer.subUnitCategory === measurement.category) && size > 0;
     const measurePerPack = hasMeasure
       ? size * factor * (offer.subUnitMode === 'many' && offer.subUnitEqual ? subCount : 1) * unitQuantity
       : 0;
@@ -34,10 +50,10 @@
       quantity: packs, packPrice, total, activeTier,
       itemsPerPack, perItem: total / (itemsPerPack * packs),
       measurePerPack, per100: measurePerPack ? total / (measurePerPack * packs) * 100 : null,
-      measureUnit: ['g', 'กรัม', 'kg', 'กก'].includes(offer.subUnitSizeType) ? '100g' : '100ml'
+      measureUnit: measurement?.category === 'weight' ? '100g' : '100ml'
     };
   }
 
-  root.DealHunterPricing = { quote };
-  if (typeof module !== 'undefined' && module.exports) module.exports = { quote };
+  root.DealHunterPricing = { quote, normalizeUnit, unitInfo };
+  if (typeof module !== 'undefined' && module.exports) module.exports = { quote, normalizeUnit, unitInfo };
 })(typeof window !== 'undefined' ? window : globalThis);
