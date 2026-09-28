@@ -9,7 +9,7 @@
             location.replace(new URL('makro-review-app/preview.html', location.href).href);
         }
     </script>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>DealHunter — เปรียบเทียบราคาและค้นหาดีล</title>
     <meta name="description" content="เปรียบเทียบราคาและราคาต่อหน่วย ค้นหาดีลจากหลายร้านในที่เดียว">
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=Noto+Sans+Thai:wght@300;400;500;600;700;800&display=swap"
@@ -63,6 +63,31 @@
         .pb-safe {
             padding-bottom: env(safe-area-inset-bottom);
         }
+
+        .mobile-shell {
+            --mobile-safe-bottom: env(safe-area-inset-bottom, 0px);
+            --mobile-nav-height: calc(85px + var(--mobile-safe-bottom));
+            --mobile-nav-clearance: calc(var(--mobile-nav-height) + 16px);
+        }
+        .mobile-shell > .pb-20,
+        .mobile-shell > .pb-24 { min-height: 0; padding-bottom: var(--mobile-nav-clearance); }
+        .mobile-shell > .mobile-feed { padding-bottom: calc(var(--mobile-nav-clearance) + 72px); }
+        .mobile-add > .overflow-y-auto { padding-bottom: 88px; }
+        .mobile-bottom-nav {
+            padding: 12px 8px calc(24px + var(--mobile-safe-bottom));
+            height: var(--mobile-nav-height);
+        }
+        .mobile-bottom-nav > button {
+            flex: 1 1 0;
+            min-width: 44px;
+            min-height: 48px;
+            justify-content: center;
+            border-radius: 12px;
+        }
+        .mobile-bottom-nav > button:focus-visible { outline: 2px solid #48A111; outline-offset: 2px; }
+        .mobile-floating-action,
+        .mobile-detail-action,
+        .mobile-consent-panel { bottom: var(--mobile-nav-clearance); }
 
         .animate-fade-in {
             animation: fadeIn 0.25s ease-out forwards;
@@ -1058,22 +1083,25 @@
             );
         };
 
-        const FamilyOffers = ({ offers, includeShipping, onSelect }) => {
+        const FamilyOffers = ({ offers, includeShipping, onSelect, showcase = false }) => {
             const result = window.DealHunterFamilyOffers.summarize(offers, includeShipping);
             const money = value => value.toLocaleString('th-TH', {minimumFractionDigits:2, maximumFractionDigits:2});
-            const renderOffer = (row, index) => <button type="button" key={row.offer.id || index} onClick={event => { event.stopPropagation(); onSelect(row.offer); }} className="w-full text-left rounded-xl border border-green-100 bg-white p-3 min-w-0" data-testid="family-offer">
-                {row.badges && <div className="flex flex-wrap gap-1 mb-2">{row.badges.map(badge => <span key={badge} className="rounded-full bg-green-100 text-green-800 text-[10px] font-bold px-2 py-1">{badge}</span>)}</div>}
+            const renderOffer = (row, index, showImage = false) => <button type="button" key={row.offer.id || index} onClick={event => { event.stopPropagation(); onSelect(row.offer); }} className="w-full text-left flex flex-col items-start rounded-xl border border-orange-100 bg-white p-3 min-w-0 overflow-hidden shadow-sm" data-testid="family-offer">
+                {row.badges && <div className="flex flex-wrap gap-1 mb-2">{row.badges.map(badge => <span key={badge} className={`rounded-full text-[10px] font-bold px-2 py-1 ${badge === 'Lowest price' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-800'}`}>{badge}</span>)}</div>}
+                {showImage && <div className="w-full h-32 mb-3 rounded-lg bg-stone-50 overflow-hidden flex items-center justify-center">
+                    {row.offer.masterImage || row.offer.image ? <img src={row.offer.masterImage || row.offer.image} alt={row.offer.name} className="w-full h-full object-contain" loading="lazy" /> : <Package size={36} className="text-stone-300" />}
+                </div>}
                 <p className="text-xs font-bold text-slate-800 break-words">{row.offer.name}</p>
                 <p className="text-xs text-slate-600 mt-1">{row.size}</p>
                 <p className="text-xs text-slate-600">{row.offer.shop || row.offer.store || 'ไม่ระบุร้าน'}</p>
-                <p className="text-lg font-bold text-green-800 mt-1">฿{money(row.total)} <span className="text-[10px] font-normal">/ แพ็ก</span></p>
+                <p className="text-lg font-bold text-red-700 mt-1">฿{money(row.total)} <span className="text-[10px] font-normal">/ แพ็ก</span></p>
                 <p className="text-xs text-slate-700">{row.unitPrice === null ? 'ยังคำนวณราคาต่อหน่วยไม่ได้' : `฿${money(row.unitPrice)} / 100 ${row.kind === 'weight' ? 'g' : 'ml'}`}</p>
                 <p className="text-[10px] text-slate-500 mt-2 leading-relaxed">{row.conditions.join(' · ')}</p>
             </button>;
             return <section className="space-y-2" aria-label="ข้อเสนอเด่น" onClick={event => event.stopPropagation()}>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" data-testid="family-highlights">{result.highlights.map(renderOffer)}</div>
-                <p className="text-[10px] text-slate-500 leading-relaxed">{result.note}</p>
-                <details className="rounded-xl border border-slate-200 bg-white p-3"><summary className="cursor-pointer text-xs font-bold text-green-700">See all sizes · ดูทุกขนาดและข้อเสนอ ({result.rows.length})</summary><div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">{result.rows.map(renderOffer)}</div></details>
+                <div className={`grid ${result.highlights.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} gap-2`} data-testid="family-highlights">{result.highlights.map((row, index) => renderOffer(row, index, true))}</div>
+                <p className={`text-[10px] leading-relaxed ${showcase ? 'text-white/90' : 'text-slate-500'}`}>{result.note}</p>
+                <details className="group rounded-xl border border-orange-100 bg-white p-3"><summary className="cursor-pointer text-xs font-bold text-red-700 min-h-[44px] flex items-center justify-between gap-2"><span>See all sizes · ดูทุกขนาดและข้อเสนอ ({result.rows.length})</span><ChevronRight size={16} className="flex-shrink-0 transition-transform group-open:rotate-90" /></summary><div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">{result.rows.map((row, index) => renderOffer(row, index))}</div></details>
             </section>;
         };
 
@@ -2095,9 +2123,11 @@
                 // ── Variant showcase card (like Shopee brand banner) ──
                 if (vg && vg.items.length >= 2) {
                     const familyOffers = deals.filter(offer => vg.items.includes(offer.name));
-                    return <div key={deal.id + '-vg'} className="col-span-2 rounded-2xl border border-green-100 bg-white p-3 shadow-sm">
-                        <button className="text-left w-full mb-3" onClick={() => { setSelectedProduct(deal); setShowAllVariants(true); setIsDescriptionExpanded(false); setCurrentView('product_detail'); }}><h3 className="font-bold text-slate-800">{vg.name || deal.name}</h3><span className="text-xs text-green-700">ดูรายละเอียดสินค้า →</span></button>
-                        <FamilyOffers offers={familyOffers} includeShipping={showShippingInFeed} onSelect={setSelectedDealDetail} />
+                    return <div key={deal.id + '-vg'} className="mobile-family col-span-2 rounded-2xl overflow-hidden shadow-md border border-red-100 bg-gradient-to-br from-red-500 via-red-600 to-orange-500">
+                        <button type="button" className="w-full text-left flex items-center justify-between gap-3 px-4 py-4 text-white" onClick={() => { setSelectedProduct(deal); setShowAllVariants(true); setIsDescriptionExpanded(false); setCurrentView('product_detail'); }}>
+                            <span className="min-w-0"><span className="block font-bold text-base break-words">{vg.name || deal.name}</span><span className="text-xs text-white/90">ดูรายละเอียดสินค้าและทุกขนาด</span></span><ChevronRight size={22} className="flex-shrink-0" />
+                        </button>
+                        <div className="p-3 pt-0"><FamilyOffers offers={familyOffers} includeShipping={showShippingInFeed} onSelect={setSelectedDealDetail} showcase /></div>
                     </div>;
                 }
 
@@ -2486,7 +2516,7 @@
                 const hasMore = feedItems.length > feedLimit;
 
                 return (
-                    <div className="flex-1 overflow-y-auto p-3 bg-gray-100 pb-24 animate-fade-in">
+                    <div className="mobile-feed flex-1 overflow-y-auto p-3 bg-gray-100 pb-24 animate-fade-in">
                         {/* Only shipping toggle remains */}
                         <div className="flex gap-2 mb-3 px-1">
                             <button
@@ -2784,7 +2814,7 @@
 
             const isBrandLocked = isItemLocked && uniqueProductsWithBrand.some(product => product.name === itemName && product.brand?.trim());
             const renderAddDeal = () => (
-                <div className="flex-1 flex flex-col bg-white overflow-hidden animate-fade-in relative z-0 pb-20">
+                <div className="mobile-add flex-1 flex flex-col bg-white overflow-hidden animate-fade-in relative z-0 pb-20">
                     {/* Reference images strip from tip-off pre-fill */}
                     {tipoffRefImages.length > 0 && (
                         <div className="bg-amber-50 border-b border-amber-200 p-3 flex items-center gap-2 flex-none">
@@ -3642,7 +3672,7 @@
                             </div>
                         </div>
 
-                        <div className="fixed bottom-[85px] inset-x-0 px-4 max-w-md mx-auto z-20">
+                        <div className="mobile-detail-action fixed inset-x-0 px-4 max-w-md mx-auto z-20">
                             <button onClick={() => {
                                 setItemName(selectedProduct.name);
                                 setBrand(selectedProduct.brand || '');
@@ -3889,7 +3919,7 @@
 
             return (
                 <div className="min-h-screen bg-gray-900 flex justify-center font-sans" style={{ fontFamily: appFont === 'noto' ? '"Noto Sans Thai", sans-serif' : '"Sarabun", sans-serif' }}>
-                    <div className="w-full max-w-md bg-gray-100 shadow-2xl relative overflow-hidden flex flex-col h-[100dvh]">
+                    <div className="mobile-shell w-full max-w-md bg-gray-100 shadow-2xl relative overflow-hidden flex flex-col h-[100dvh]">
 
                         {currentView !== 'store_detail' && currentView !== 'brand_detail' && currentView !== 'category_detail' && (
                             <header className="bg-green-500 text-white p-4 rounded-b-2xl shadow-md z-10 flex-none">
@@ -3932,7 +3962,7 @@
                         {currentView === 'category_detail' && renderCategoryDetail()}
 
                         {currentView === 'feed' && (
-                            <button onClick={() => { resetAddDealForm(); setCurrentView('add'); }} className="absolute bottom-20 right-6 bg-gradient-to-br from-green-400 to-green-600 text-white p-4 rounded-full shadow-lg shadow-green-200 hover:scale-105 transform transition-all flex items-center justify-center z-20 border-2 border-white">
+                            <button aria-label="บอกต่อราคาใหม่" onClick={() => { resetAddDealForm(); setCurrentView('add'); }} className="mobile-floating-action absolute right-6 bg-gradient-to-br from-green-400 to-green-600 text-white p-4 rounded-full shadow-lg shadow-green-200 hover:scale-105 transform transition-all flex items-center justify-center z-20 border-2 border-white">
                                 <Plus size={24} />
                             </button>
                         )}
@@ -3940,14 +3970,13 @@
                         {/* Floating Tip-off Camera Button */}
                         {currentView === 'add' && (
                             <button onClick={() => setShowTipoffModal(true)}
-                                className="absolute bottom-20 right-4 text-white p-3.5 rounded-full shadow-lg hover:scale-105 transform transition-all flex items-center justify-center z-20 border-2 border-white animate-pulse-oy">
+                                aria-label="ฝากรูปชี้เป้า" className="mobile-floating-action absolute right-4 text-white p-3.5 rounded-full shadow-lg hover:scale-105 transform transition-all flex items-center justify-center z-20 border-2 border-white animate-pulse-oy">
                                 <Camera size={22} />
                             </button>
                         )}
 
                         {currentView !== 'store_detail' && currentView !== 'brand_detail' && (
-                            <nav className="absolute bottom-0 w-full bg-white border-t border-gray-200 flex justify-around pt-3 z-30 text-xs text-gray-500 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]"
-                                style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 8px)' }}>
+                            <nav aria-label="เมนูหลัก" className="mobile-bottom-nav absolute bottom-0 w-full bg-white border-t border-gray-200 flex justify-around z-30 text-xs text-gray-500 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
                                 <button onClick={() => setCurrentView('feed')} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'feed' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}><Home size={20} className={currentView === 'feed' ? 'fill-current' : ''} /> หน้าแรก</button>
                                 <button onClick={() => { setCurrentView('search'); setActiveCategoryFilter(null); setActiveBrandFilter(null); setSearchFilterMode('all'); }} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'search' ? 'text-orange-500 font-bold' : 'hover:text-orange-400'}`}><Search size={20} /> ค้นหา</button>
                                 <button onClick={() => { if (currentView !== 'add') resetAddDealForm(); setCurrentView('add'); }} className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'add' ? 'text-green-500 font-bold' : 'hover:text-green-400'}`}><ListPlus size={20} /> บอกต่อ</button>
@@ -3958,7 +3987,7 @@
 
                         {/* PDPA BANNER */}
                         {!pdpaAccepted && (
-                            <div className="absolute bottom-[70px] left-4 right-4 p-4 bg-white/95 backdrop-blur-md border border-gray-100 rounded-2xl z-[40] animate-slide-up shadow-2xl">
+                            <div className="mobile-consent-panel absolute left-4 right-4 p-4 bg-white/95 backdrop-blur-md border border-gray-100 rounded-2xl z-[40] animate-slide-up shadow-2xl">
                                 <div className="flex flex-col gap-3">
                                     <div className="flex items-start gap-3">
                                         <div className="p-2 bg-blue-50 text-blue-500 rounded-xl flex-none">
